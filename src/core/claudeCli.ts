@@ -94,6 +94,16 @@ export interface ClaudeRequest {
   resume?: string;
   /** Outils disponibles. Une liste vide n'en laisse aucun. */
   tools: readonly string[];
+  /**
+   * Règles de permission (`Bash(npm test:*)`…). Absentes : les outils de
+   * `tools`, tous autorisés. Ce qui n'est pas autorisé est refusé : `-p` ne
+   * pose jamais de question.
+   */
+  allowedTools?: readonly string[];
+  /** Règles refusées dans tous les cas, par prudence (`Bash(git push:*)`). */
+  disallowedTools?: readonly string[];
+  /** Agent de `.claude/agents/` qui mène la session. */
+  agent?: string;
   appendSystemPrompt?: string;
   signal?: AbortSignal;
 }
@@ -103,9 +113,26 @@ export interface ClaudeResponse {
   /** Le `structured_output` du CLI, à valider par l'appelant. */
   output: unknown;
   costUsd?: number;
+  /** Les appels d'outils refusés faute de permission, résumés. */
+  permissionDenials?: string[];
 }
 
 export type ClaudeRunner = (request: ClaudeRequest) => Promise<ClaudeResponse>;
+
+/** Un appel suivi en direct : chaque événement du CLI est remis à `onEvent`. */
+export interface ClaudeStreamRequest extends ClaudeRequest {
+  onEvent: (event: StreamEvent) => void;
+}
+
+export type ClaudeStreamRunner = (request: ClaudeStreamRequest) => Promise<ClaudeResponse>;
+
+/** Un événement de `--output-format stream-json`, réduit à ce que le journal affiche. */
+export type StreamEvent =
+  | { kind: 'init'; sessionId: string; model?: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; detail: string }
+  | { kind: 'toolError'; detail: string }
+  | { kind: 'result'; ok: boolean; detail: string };
 
 export class ClaudeError extends Error {
   constructor(
@@ -124,18 +151,35 @@ export class ClaudeError extends Error {
  * commande sous Windows, ni risque qu'une option à valeurs multiples l'avale.
  * `--bare` n'est jamais utilisé : il contourne la connexion par abonnement.
  */
-export function buildClaudeArgs(request: ClaudeRequest): string[] {
-  const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(request.schema)];
+export function buildClaudeArgs(request: ClaudeRequest, stream = false): string[] {
+  const args = stream
+    ? ['-p', '--output-format', 'stream-json', '--verbose']
+    : ['-p', '--output-format', 'json'];
+  args.push('--json-schema', JSON.stringify(request.schema));
   if (request.model) {
     args.push('--model', request.model);
   }
   if (request.resume) {
     args.push('--resume', request.resume);
   }
+  if (request.agent) {
+    args.push('--agent', request.agent);
+  }
   args.push('--tools', request.tools.join(','));
-  if (request.tools.length > 0) {
+  // Une règle par argument : une règle peut contenir des espaces.
+  if (request.allowedTools) {
+    if (request.allowedTools.length > 0) {
+      args.push('--allowedTools', ...request.allowedTools);
+    }
+  } else if (request.tools.length > 0) {
     args.push('--allowedTools', request.tools.join(','));
   }
+  if (request.disallowedTools && request.disallowedTools.length > 0) {
+    args.push('--disallowedTools', ...request.disallowedTools);
+  }
+  // Mode par défaut : ce qui n'est pas autorisé est refusé, y compris la
+  // redirection d'un `echo` vers un fichier, que `acceptEdits` laisse passer.
+  args.push('--permission-mode', 'default');
   if (request.appendSystemPrompt) {
     args.push('--append-system-prompt', request.appendSystemPrompt);
   }
@@ -163,36 +207,203 @@ export function parseClaudeResult(stdout: string): ClaudeResponse {
   return {
     sessionId: result.session_id,
     output: result.structured_output,
-    costUsd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined
+    costUsd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined,
+    permissionDenials: readDenials(result.permission_denials)
   };
 }
 
 export function createClaudeRunner(executable: string): ClaudeRunner {
-  return async (request) => {
-    try {
-      const { stdout } = await exec(executable, buildClaudeArgs(request), {
-        cwd: request.cwd,
-        input: request.prompt,
-        signal: request.signal
-      });
-      return parseClaudeResult(stdout);
-    } catch (err) {
-      if (err instanceof ClaudeError) {
-        throw err;
-      }
-      if (err instanceof ExecError) {
-        if (err.cancelled) {
-          throw new ClaudeError('Appel à Claude annulé.', true);
+  return (request) => runCli(executable, buildClaudeArgs(request), request);
+}
+
+/**
+ * Le lanceur suivi en direct : `stream-json`, une ligne JSON par événement.
+ *
+ * La dernière ligne est le résultat, de la même forme que la sortie `json` :
+ * session, `structured_output`, refus de permission.
+ */
+export function createClaudeStreamRunner(executable: string): ClaudeStreamRunner {
+  return (request) => {
+    let pending = '';
+    const onStdout = (chunk: string): void => {
+      pending += chunk;
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        for (const event of parseStreamLine(line.trim())) {
+          request.onEvent(event);
         }
-        // En échec, le CLI écrit souvent tout de même son JSON de résultat.
-        if (err.result.stdout.trim().startsWith('{')) {
-          return parseClaudeResult(err.result.stdout);
-        }
-        throw new ClaudeError(err.message);
       }
+    };
+    return runCli(executable, buildClaudeArgs(request, true), request, onStdout);
+  };
+}
+
+async function runCli(
+  executable: string,
+  args: string[],
+  request: ClaudeRequest,
+  onStdout?: (chunk: string) => void
+): Promise<ClaudeResponse> {
+  try {
+    const { stdout } = await exec(executable, args, {
+      cwd: request.cwd,
+      env: subscriptionEnv(process.env),
+      input: request.prompt,
+      signal: request.signal,
+      onStdout
+    });
+    return parseClaudeResult(stdout);
+  } catch (err) {
+    if (err instanceof ClaudeError) {
       throw err;
     }
-  };
+    if (err instanceof ExecError) {
+      if (err.cancelled) {
+        throw new ClaudeError('Appel à Claude annulé.', true);
+      }
+      // En échec, le CLI écrit souvent tout de même son JSON de résultat.
+      if (err.result.stdout.includes('"type":"result"')) {
+        return parseClaudeResult(err.result.stdout);
+      }
+      throw new ClaudeError(err.message);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Variables qui feraient passer le CLI par l'API (clé, jeton, Bedrock, Vertex)
+ * au lieu de la connexion par abonnement du poste.
+ */
+const API_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX'
+];
+
+/**
+ * L'environnement des appels à `claude` : celui du poste, sans ce qui le
+ * ferait facturer à l'API. Une clé présente sur le poste n'est jamais utilisée.
+ */
+export function subscriptionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean = { ...env };
+  for (const name of Object.keys(clean)) {
+    if (API_ENV_VARS.includes(name.toUpperCase())) {
+      delete clean[name];
+    }
+  }
+  return clean;
+}
+
+function readDenials(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((d: unknown) => {
+    const denial = (d ?? {}) as { tool_name?: unknown; tool_input?: Record<string, unknown> };
+    const input = denial.tool_input ?? {};
+    const detail = input.command ?? input.file_path ?? input.pattern ?? '';
+    return `${String(denial.tool_name ?? '?')}${detail ? ` : ${String(detail)}` : ''}`;
+  });
+}
+
+/**
+ * Traduit une ligne de `stream-json` en événements pour le journal.
+ *
+ * Seuls les messages utiles pour suivre l'agent sont gardés : son texte, ses
+ * appels d'outils, les erreurs d'outils et le résultat. Le reste (réflexion,
+ * quotas, tokens) est ignoré.
+ */
+export function parseStreamLine(line: string): StreamEvent[] {
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  switch (event.type) {
+    case 'system':
+      return event.subtype === 'init' && typeof event.session_id === 'string'
+        ? [{ kind: 'init', sessionId: event.session_id, model: asString(event.model) }]
+        : [];
+    case 'assistant':
+      return contentOf(event).flatMap((block): StreamEvent[] => {
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+          return [{ kind: 'text', text: block.text.trim() }];
+        }
+        // L'outil de sortie structurée n'intéresse pas le journal : le résultat suit.
+        if (block.type === 'tool_use' && typeof block.name === 'string' && block.name !== 'StructuredOutput') {
+          return [{ kind: 'tool', name: block.name, detail: toolDetail(block.input) }];
+        }
+        return [];
+      });
+    case 'user':
+      return contentOf(event).flatMap((block): StreamEvent[] =>
+        block.type === 'tool_result' && block.is_error === true
+          ? [{ kind: 'toolError', detail: truncate(resultText(block.content), 300) }]
+          : []
+      );
+    case 'result': {
+      const ok = event.is_error !== true && event.subtype === 'success';
+      const turns = typeof event.num_turns === 'number' ? `${event.num_turns} tours` : '';
+      const cost =
+        typeof event.total_cost_usd === 'number' ? `${event.total_cost_usd.toFixed(2)} $` : '';
+      const detail = [String(event.subtype ?? ''), turns, cost].filter(Boolean).join(' · ');
+      return [{ kind: 'result', ok, detail }];
+    }
+    default:
+      return [];
+  }
+}
+
+/** Une ligne de journal lisible pour un événement. */
+export function formatStreamEvent(event: StreamEvent): string {
+  switch (event.kind) {
+    case 'init':
+      return `Session ${event.sessionId}${event.model ? ` (${event.model})` : ''}`;
+    case 'text':
+      return event.text;
+    case 'tool':
+      return `→ ${event.name}${event.detail ? ` : ${event.detail}` : ''}`;
+    case 'toolError':
+      return `✗ ${event.detail}`;
+    case 'result':
+      return `${event.ok ? 'Terminé' : 'Échec'} — ${event.detail}`;
+  }
+}
+
+type ContentBlock = Record<string, unknown> & { type?: unknown };
+
+function contentOf(event: Record<string, unknown>): ContentBlock[] {
+  const message = event.message as { content?: unknown } | undefined;
+  return Array.isArray(message?.content) ? (message.content as ContentBlock[]) : [];
+}
+
+function toolDetail(input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const detail = i.command ?? i.file_path ?? i.pattern ?? i.path ?? i.description ?? '';
+  return truncate(String(detail).replace(/\s+/g, ' '), 200);
+}
+
+function resultText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((c: unknown) => {
+        const text = (c as { text?: unknown } | null)?.text;
+        return typeof text === 'string' ? text : '';
+      })
+      .join(' ');
+  }
+  return '';
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** Le CLI peut écrire des avertissements avant le JSON : seule la dernière ligne compte. */

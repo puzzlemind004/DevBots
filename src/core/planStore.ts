@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { Answers, PlanSection, StoryPlan, Understanding } from './plan.js';
 import { renderPlanMarkdown } from './planRender.js';
+import { readJson, replaceFile } from '../util/files.js';
 
 export type PlanningPhase = 'understanding' | 'planning' | 'validated';
 
@@ -52,26 +53,15 @@ export class PlanStore {
     return path.join(this.plansRoot, safeId(storyId));
   }
 
-  async load(storyId: string): Promise<PlanningState | undefined> {
-    try {
-      const raw = await fs.readFile(path.join(this.dir(storyId), 'session.json'), 'utf8');
-      return JSON.parse(raw) as PlanningState;
-    } catch (err) {
-      if (isMissing(err)) {
-        return undefined;
-      }
-      throw err;
-    }
+  load(storyId: string): Promise<PlanningState | undefined> {
+    return readJson<PlanningState>(path.join(this.dir(storyId), 'session.json'));
   }
 
   async save(state: PlanningState): Promise<void> {
     const dir = this.dir(state.storyId);
     await fs.mkdir(dir, { recursive: true });
     state.updatedAt = new Date().toISOString();
-    // Écriture puis renommage : un arrêt brutal ne laisse pas un état à moitié écrit.
-    const target = path.join(dir, 'session.json');
-    await fs.writeFile(`${target}.tmp`, JSON.stringify(state, null, 2), 'utf8');
-    await fs.rename(`${target}.tmp`, target);
+    await replaceFile(path.join(dir, 'session.json'), JSON.stringify(state, null, 2));
   }
 
   /** Enregistre une nouvelle version et rend son numéro. */

@@ -9,7 +9,8 @@ Spécification complète : [Proposition — Extension VS Code Dev Flow](https://
 
 ## État
 
-Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
+Phases 1 (fondations), 2 (planification) et 3 (dev et supervision) livrées.
+Ce qui marche aujourd'hui :
 
 - paramètres par dépôt, secrets dans le SecretStorage ;
 - connecteur GitHub : une issue parente et ses sub-issues deviennent des fiches ;
@@ -28,9 +29,21 @@ Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
   section par section, versions et diff, validation qui place la fiche dans
   `ready/` (voir [Planification](docs/planification.md)) ;
 - gabarits du plan et du CR remplaçables par ceux du dépôt, dans
-  `.work/templates/` (voir [Gabarits](docs/gabarits.md)).
+  `.work/templates/` (voir [Gabarits](docs/gabarits.md)) ;
+- dev d'un clic depuis Ready : file d'attente plafonnée, dépendances
+  vérifiées d'après les plans, pas de parallélisme sur des fichiers communs ;
+- branche de feature, branche de story et worktree préparés par l'extension,
+  dépendances installées ;
+- agent de dev borné à une liste de commandes, journal en direct, commit par
+  l'extension ;
+- revue du CR, étapes de supervision du dépôt (`.work/supervision.json`,
+  pre-pr-check par défaut), tri des problèmes en fiches `LOCAL-<n>`, boucle de
+  correction plafonnée, jusqu'à « À valider » (voir
+  [Dev et supervision](docs/dev-et-supervision.md)) ;
+- `.work/state.json`, barre d'état des agents, notifications, reprise après
+  un redémarrage.
 
-Les phases suivantes (agents de dev, review et merge) sont décrites dans la
+La phase suivante (review humaine, feu vert et merge) est décrite dans la
 proposition.
 
 ## Démarrer
@@ -58,7 +71,16 @@ contient (ou contiendra) un dossier `.work`.
 | `devbots.planning.template` | Gabarit de plan de story, relatif au dépôt ; vide : `.work/templates/plan.md`, sinon le gabarit par défaut |
 | `devbots.planning.model` | Modèle de l'atelier, `opus` par défaut |
 | `devbots.planning.maxResumes` | Plafond de reprises d'une session de planification |
-| `devbots.agents.maxParallel` | Plafond d'agents de dev simultanés (phase 3) |
+| `devbots.agents.maxParallel` | Plafond de stories traitées en même temps |
+| `devbots.dev.skill` | Skill de dev du dépôt (par exemple `dev-story`) ; vide : consigne générique |
+| `devbots.dev.model` | Modèle proposé au lancement ; vide : celui que recommande le plan |
+| `devbots.dev.allowedCommands` | Commandes que l'agent de dev peut lancer, par préfixe |
+| `devbots.dev.installCommand` | Installation des dépendances d'un worktree ; vide : détectée, `none` : aucune |
+| `devbots.dev.rulesFile` | Règles de dev données à l'agent ; vide : le `CLAUDE.md` suffit |
+| `devbots.git.baseBranch` | Départ des branches de feature ; vide : la branche courante |
+| `devbots.worktrees.root` | Dossier des worktrees ; vide : `<dépôt>.worktrees` |
+| `devbots.supervision.model` | Modèle de la revue du CR et des étapes, `opus` par défaut |
+| `devbots.supervision.maxLoops` | Plafond de boucles de correction, sauf `maxLoops` de `supervision.json` |
 | `devbots.claude.executable` | Commande du CLI Claude Code |
 
 ### Accès aux sources
@@ -88,6 +110,16 @@ ni dans `.work`.
 | DevBots : effacer le jeton d'accès | Le retire |
 | DevBots : vérifier l'installation de Claude Code | Teste le CLI et sa version |
 | DevBots : personnaliser les gabarits | Dépose les gabarits par défaut du plan et du CR dans `.work/templates/`, sans écraser ceux qui existent, et les ouvre |
+| DevBots : lancer le dev | Met une story de Ready en file, avec le modèle choisi (aussi : ▶ sur la story) |
+| DevBots : arrêter l'agent | Interrompt l'agent ; la story passe bloquée |
+| DevBots : relancer la story | Remet en file une story bloquée ; l'agent reprend sa session |
+| DevBots : retirer du flux de dev | Rend à Ready une story en file, bloquée ou à valider ; worktree et branche restent |
+| DevBots : journal de l'agent | Le journal de la story, en direct |
+| DevBots : compte rendu de dev | Le CR de la story |
+| DevBots : rapport de supervision | Revue du CR, problèmes de chaque étape, fiches créées par le tri |
+| DevBots : trancher une dépendance | Attendre une dépendance infirmée par le plan, ou lever une dépendance confirmée |
+| DevBots : reclasser la fiche | Fiche née du tri : de New à Ready, ou l'inverse |
+| DevBots : personnaliser la supervision | Dépose `.work/supervision.json` prérempli et l'ouvre |
 
 ## Documentation
 
@@ -95,3 +127,4 @@ ni dans `.work`.
 - [Format des fiches](docs/format-fiches.md) — frontmatter, fiches locales et resynchronisation
 - [Planification](docs/planification.md) — l'atelier, le gabarit et `.work/plans`
 - [Gabarits](docs/gabarits.md) — plan et CR, ceux du dépôt ou ceux par défaut
+- [Dev et supervision](docs/dev-et-supervision.md) — file d'attente, worktrees, agents, revue, tri

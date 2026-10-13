@@ -79,7 +79,10 @@ export function renderFrontmatter(fm: object): string {
     if (value === undefined) {
       continue;
     }
-    if (Array.isArray(value)) {
+    if (Array.isArray(value) && value.length === 0) {
+      // `key:` seul se lirait `null` en YAML.
+      lines.push(`${key}: []`);
+    } else if (Array.isArray(value)) {
       lines.push(`${key}:`);
       for (const item of value) {
         lines.push(`  - ${yamlScalar(item)}`);

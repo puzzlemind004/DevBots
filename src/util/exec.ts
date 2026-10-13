@@ -17,6 +17,14 @@ export interface ExecOptions {
   input?: string;
   /** Arrête le processus quand le signal est levé. */
   signal?: AbortSignal;
+  /** Reçoit la sortie standard au fil de l'eau, morceau par morceau. */
+  onStdout?: (chunk: string) => void;
+  /**
+   * Passe par le shell du système. Réservé aux commandes tirées des
+   * paramètres (installation des dépendances), jamais à du contenu de ticket :
+   * le shell interprète les arguments.
+   */
+  shell?: boolean;
 }
 
 export interface ExecResult {
@@ -45,6 +53,9 @@ export async function exec(
   args: readonly string[],
   options: ExecOptions = {}
 ): Promise<ExecResult> {
+  if (options.shell) {
+    return run(command, command, args, options);
+  }
   let target = resolved.get(command);
   if (!target) {
     target = resolveCommand(command);
@@ -69,7 +80,7 @@ function run(
       child = spawn(executable, [...args], {
         cwd: options.cwd,
         env: options.env ?? process.env,
-        shell: false,
+        shell: options.shell === true,
         windowsHide: true
       });
     } catch (err) {
@@ -130,8 +141,10 @@ function run(
       child.stdin?.end();
     }
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk;
+      options.onStdout?.(chunk);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');

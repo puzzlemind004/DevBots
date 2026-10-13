@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
-import { buildClaudeArgs, ClaudeError, parseClaudeResult } from '../../src/core/claudeCli.js';
+import {
+  buildClaudeArgs,
+  ClaudeError,
+  formatStreamEvent,
+  parseClaudeResult,
+  parseStreamLine,
+  subscriptionEnv
+} from '../../src/core/claudeCli.js';
 import { safeId } from '../../src/core/planStore.js';
 import { shimTarget } from '../../src/util/resolveCommand.js';
 
@@ -26,6 +33,70 @@ describe('buildClaudeArgs', () => {
     expect(args[args.indexOf('--tools') + 1]).toBe('');
     expect(args).not.toContain('--allowedTools');
   });
+
+  it('refuse tout ce qui n’est pas autorisé : mode de permission par défaut', () => {
+    const args = buildClaudeArgs(base);
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
+  });
+
+  it('passe chaque règle de permission comme un argument à part', () => {
+    const args = buildClaudeArgs(
+      {
+        ...base,
+        tools: ['Read', 'Bash'],
+        allowedTools: ['Read', 'Bash(npm run build:*)'],
+        disallowedTools: ['Bash(git push:*)'],
+        agent: 'reviewer'
+      },
+      true
+    );
+    expect(args.slice(0, 4)).toEqual(['-p', '--output-format', 'stream-json', '--verbose']);
+    const allowed = args.indexOf('--allowedTools');
+    expect(args.slice(allowed + 1, allowed + 3)).toEqual(['Read', 'Bash(npm run build:*)']);
+    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Bash(git push:*)');
+    expect(args[args.indexOf('--agent') + 1]).toBe('reviewer');
+  });
+});
+
+describe('parseStreamLine', () => {
+  const line = (event: object) => JSON.stringify(event);
+
+  it("garde le texte et les appels d'outils de l'agent", () => {
+    const events = parseStreamLine(
+      line({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'thinking', thinking: 'secret' },
+            { type: 'text', text: 'Je lance le build.' },
+            { type: 'tool_use', name: 'Bash', input: { command: 'npm run build' } },
+            { type: 'tool_use', name: 'StructuredOutput', input: {} }
+          ]
+        }
+      })
+    );
+    expect(events.map(formatStreamEvent)).toEqual(['Je lance le build.', '→ Bash : npm run build']);
+  });
+
+  it("signale les erreurs d'outils et ignore le reste", () => {
+    const refused = line({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', is_error: true, content: 'This command requires approval' }] }
+    });
+    expect(parseStreamLine(refused)).toEqual([{ kind: 'toolError', detail: 'This command requires approval' }]);
+    expect(parseStreamLine(line({ type: 'rate_limit_event' }))).toEqual([]);
+    expect(parseStreamLine('pas du json')).toEqual([]);
+  });
+
+  it('lit la session et le résultat', () => {
+    expect(parseStreamLine(line({ type: 'system', subtype: 'init', session_id: 's1', model: 'sonnet' }))).toEqual([
+      { kind: 'init', sessionId: 's1', model: 'sonnet' }
+    ]);
+    const [result] = parseStreamLine(
+      line({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, total_cost_usd: 0.5 })
+    );
+    expect(result && formatStreamEvent(result)).toBe('Terminé — success · 3 tours · 0.50 $');
+  });
 });
 
 describe('parseClaudeResult', () => {
@@ -41,8 +112,19 @@ describe('parseClaudeResult', () => {
     expect(parseClaudeResult(`avertissement\n${out}`)).toEqual({
       sessionId: 's1',
       output: { word: 'pomme' },
-      costUsd: 0.01
+      costUsd: 0.01,
+      permissionDenials: []
     });
+  });
+
+  it('résume les appels refusés faute de permission', () => {
+    const out = JSON.stringify({
+      subtype: 'success',
+      session_id: 's1',
+      structured_output: {},
+      permission_denials: [{ tool_name: 'Bash', tool_input: { command: 'git push' } }]
+    });
+    expect(parseClaudeResult(out).permissionDenials).toEqual(['Bash : git push']);
   });
 
   it('remonte une erreur du CLI', () => {
@@ -76,5 +158,17 @@ describe('safeId', () => {
     expect(safeId('../../etc')).toBe('__.._etc');
     expect(safeId('..')).toBe('_');
     expect(safeId('a/b\\c')).toBe('a_b_c');
+  });
+});
+
+describe('subscriptionEnv', () => {
+  it("retire ce qui ferait passer le CLI par l'API, et garde le reste", () => {
+    const env = subscriptionEnv({
+      PATH: '/bin',
+      ANTHROPIC_API_KEY: 'sk-x',
+      anthropic_auth_token: 't',
+      CLAUDE_CODE_USE_BEDROCK: '1'
+    });
+    expect(env).toEqual({ PATH: '/bin' });
   });
 });

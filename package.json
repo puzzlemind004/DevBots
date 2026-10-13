@@ -108,8 +108,78 @@
           "minimum": 1,
           "maximum": 8,
           "default": 2,
-          "markdownDescription": "Nombre maximal d'agents de dev en parallèle. Un build Angular consomme beaucoup de mémoire : à régler selon la machine, pas seulement selon le quota.",
+          "markdownDescription": "Nombre maximal d'agents en parallèle (dev, revue, supervision). Un build Angular consomme beaucoup de mémoire : à régler selon la machine, pas seulement selon le quota.",
           "scope": "window"
+        },
+        "devbots.dev.skill": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Skill de dev du dépôt, sans la barre oblique (par exemple `dev-story`). Il ouvre chaque session de dev. Vide : consigne générique de DevBots.",
+          "scope": "resource"
+        },
+        "devbots.dev.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Modèle de l'agent de dev proposé au lancement. Vide : celui que recommande le plan (`opus`, `sonnet` ou `haiku`).",
+          "scope": "resource"
+        },
+        "devbots.dev.allowedCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "npx ng build",
+            "npx ng test --watch=false",
+            "npm run build",
+            "npm test",
+            "npm run test",
+            "npm run lint",
+            "git status",
+            "git diff",
+            "git log",
+            "git show"
+          ],
+          "markdownDescription": "Commandes que l'agent de dev peut lancer, par préfixe : `npm run build` autorise aussi `npm run build -- --configuration=x`. Toute autre commande est refusée. `git push`, `git commit`, les changements de branche et `ng serve` restent refusés quoi qu'il arrive.",
+          "scope": "resource"
+        },
+        "devbots.dev.installCommand": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Installation des dépendances d'un worktree neuf. Vide : déduite du fichier de verrouillage (`pnpm install --frozen-lockfile`, `npm ci`…). `none` : aucune.",
+          "scope": "resource"
+        },
+        "devbots.dev.rulesFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Règles de dev à donner à l'agent, relatif au dépôt (par exemple `docs/regle-dev.md`). Vide : le `CLAUDE.md` du dépôt, chargé d'office, suffit.",
+          "scope": "resource"
+        },
+        "devbots.git.baseBranch": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Branche de départ des branches de feature (`feature/<id>-<slug>`), créées au lancement de la première story de la feature. Vide : la branche courante du dépôt.",
+          "scope": "resource"
+        },
+        "devbots.worktrees.root": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Dossier des worktrees des stories, relatif au dépôt ou absolu. Vide : `<dépôt>.worktrees`, à côté du dépôt.",
+          "scope": "resource"
+        },
+        "devbots.supervision.model": {
+          "type": "string",
+          "default": "opus",
+          "markdownDescription": "Modèle de la revue du CR et des étapes de supervision qui n'en fixent pas.",
+          "scope": "resource"
+        },
+        "devbots.supervision.maxLoops": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3,
+          "markdownDescription": "Nombre maximal de boucles de correction (revue du CR ou supervision) avant que la story te revienne. `maxLoops` de `.work/supervision.json` est prioritaire.",
+          "scope": "resource"
         },
         "devbots.claude.executable": {
           "type": "string",
@@ -184,6 +254,49 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "devbots.startDev",
+        "title": "DevBots : lancer le dev",
+        "icon": "$(play)"
+      },
+      {
+        "command": "devbots.stopDev",
+        "title": "DevBots : arrêter l'agent",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "devbots.retryDev",
+        "title": "DevBots : relancer la story",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "devbots.dequeue",
+        "title": "DevBots : retirer du flux de dev"
+      },
+      {
+        "command": "devbots.showJournal",
+        "title": "DevBots : journal de l'agent",
+        "icon": "$(output)"
+      },
+      {
+        "command": "devbots.openReport",
+        "title": "DevBots : rapport de supervision",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "devbots.openCr",
+        "title": "DevBots : compte rendu de dev",
+        "icon": "$(book)"
+      },
+      {
+        "command": "devbots.decideDependency",
+        "title": "DevBots : trancher une dépendance"
+      },
+      {
+        "command": "devbots.reclassify",
+        "title": "DevBots : reclasser la fiche (New ↔ Ready)",
+        "icon": "$(arrow-swap)"
+      },
+      {
         "command": "devbots.setToken",
         "title": "DevBots : enregistrer un jeton d'accès"
       },
@@ -198,6 +311,10 @@
       {
         "command": "devbots.customizeTemplates",
         "title": "DevBots : personnaliser les gabarits"
+      },
+      {
+        "command": "devbots.customizeSupervision",
+        "title": "DevBots : personnaliser la supervision"
       }
     ],
     "menus": {
@@ -236,7 +353,7 @@
         },
         {
           "command": "devbots.deleteCard",
-          "when": "view == devbots.flow && viewItem =~ /^(story|feature)/",
+          "when": "view == devbots.flow && viewItem =~ /^(story:(new|ready|done)|feature)/",
           "group": "9_delete@1"
         },
         {
@@ -253,6 +370,51 @@
           "command": "devbots.newFeature",
           "when": "view == devbots.flow && viewItem == group:new",
           "group": "inline@2"
+        },
+        {
+          "command": "devbots.startDev",
+          "when": "view == devbots.flow && viewItem =~ /^story:ready/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devbots.stopDev",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:(in_dev|ai_review|pre_pr_check)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devbots.retryDev",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devbots.showJournal",
+          "when": "view == devbots.flow && viewItem =~ /^story:(dev|review)/",
+          "group": "inline@3"
+        },
+        {
+          "command": "devbots.openCr",
+          "when": "view == devbots.flow && viewItem =~ /^story:review/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devbots.openReport",
+          "when": "view == devbots.flow && viewItem =~ /^story:(review|dev:blocked)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devbots.dequeue",
+          "when": "view == devbots.flow && viewItem =~ /^story:(dev:(queued|blocked)|review:awaiting_human)/",
+          "group": "8_flow@1"
+        },
+        {
+          "command": "devbots.decideDependency",
+          "when": "view == devbots.flow && viewItem =~ /^story:(ready|dev:queued)/",
+          "group": "8_flow@2"
+        },
+        {
+          "command": "devbots.reclassify",
+          "when": "view == devbots.flow && viewItem =~ /^story:(new|ready).*:followup/",
+          "group": "8_flow@3"
         }
       ],
       "commandPalette": [
@@ -266,6 +428,10 @@
         },
         {
           "command": "devbots.deleteCard",
+          "when": "false"
+        },
+        {
+          "command": "devbots.reclassify",
           "when": "false"
         }
       ]

@@ -122,6 +122,21 @@ _À compléter : l'objectif de la feature et le contexte commun à ses stories._
 
 Une fiche locale n'a pas de source : la resynchronisation ne la touche jamais.
 
+### Fiche née du tri
+
+La supervision crée aussi des fiches `LOCAL-<n>`, rangées sous la feature de
+la story d'origine (voir [Dev et supervision](dev-et-supervision.md#tri-des-problèmes)).
+Leur frontmatter dit d'où elles viennent :
+
+```yaml
+origin: "pre-pr-check"
+origin_story: "42"
+```
+
+Une fiche simple arrive directement dans `ready/`, avec une section
+`## Mini-plan`, `recommended_model: "haiku"` et le fichier concerné dans
+`files`. Une fiche complexe arrive dans `new/` et passe par l'atelier.
+
 ## Fiches de feature
 
 Une feature ne passe pas par le flux : elle ne se planifie pas et ne bouge pas

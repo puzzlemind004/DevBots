@@ -74,6 +74,21 @@ export interface StoryFrontmatter {
   needs_review?: boolean;
   /** Révision vue dans la source au moment du marquage. */
   source_rev_seen?: string;
+  /** Les champs suivants sont écrits au passage en ready, depuis le plan validé. */
+  planned_at?: string;
+  /** Plan JSON, relatif au dossier du flux. Absent pour une fiche issue du tri. */
+  plan?: string;
+  plan_version?: number;
+  recommended_model?: string;
+  complexity?: string;
+  dependencies_confirmed?: string[];
+  dependencies_refuted?: string[];
+  /** Fichiers impactés d'après le plan. */
+  files?: string[];
+  /** `pre-pr-check` (ou le nom de l'étape) pour une fiche née du tri des problèmes. */
+  origin?: string;
+  /** La story dont la supervision a fait naître cette fiche. */
+  origin_story?: string;
 }
 
 export type SourceKind = 'github' | 'azureDevOps';

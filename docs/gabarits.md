@@ -9,7 +9,7 @@ l'extension.
 | Gabarit | Fichier du dépôt | Rempli par |
 | --- | --- | --- |
 | Plan de story | `.work/templates/plan.md` | L'extension, au passage en ready |
-| CR | `.work/templates/cr.md` | L'agent de dev (phase 3) |
+| CR | `.work/templates/cr.md` | L'agent de dev |
 
 Pour chacun, l'extension retient le premier qui existe :
 
@@ -32,10 +32,13 @@ Le plan est rempli par le code, depuis les marqueurs `{{…}}` listés dans
 
 ## CR
 
-Le CR est rédigé par l'agent de dev, qui reçoit le chemin du gabarit : ses
-sections sont des consignes, et les commentaires `<!-- … -->` disent ce que
-chacune attend. L'extension ne remplit que `{{title}}` et `{{source_id}}`.
+Le CR est rédigé par l'agent de dev. L'extension remplit `{{title}}` et
+`{{source_id}}`, dépose le résultat dans `.devbots/cr-template.md` du worktree
+et donne ce chemin à l'agent : les sections sont des consignes, et les
+commentaires `<!-- … -->` disent ce que chacune attend. L'agent écrit son CR
+dans `.devbots/cr.md` ; l'extension le copie dans `.work/runs/<id>/cr.md`.
 
 Rien de ce que l'extension affiche ne dépend de la forme du CR : le statut du
-build et des tests viendra de la sortie structurée de la session de dev. Le CR
-peut donc prendre la forme que veut l'équipe.
+build et des tests vient de la sortie structurée de la session de dev. Le CR
+peut donc prendre la forme que veut l'équipe. Seule son absence est contrôlée :
+un CR manquant renvoie l'agent à sa rédaction.

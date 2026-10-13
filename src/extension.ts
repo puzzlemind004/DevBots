@@ -5,6 +5,8 @@
  * à la main de features et de stories, suppression d'une fiche, panneau latéral,
  * vérification du CLI Claude Code.
  * Phase 2 : atelier de planification, de New à Ready ; gabarits du dépôt.
+ * Phase 3 : state.json, worktrees, agents de dev, revue des CR, étapes de
+ * supervision et tri des problèmes, de Ready à « À valider ».
  */
 
 import { promises as fs } from 'node:fs';
@@ -18,6 +20,7 @@ import { deleteCard } from './ui/deleteCommand.js';
 import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
 import { customizeTemplates } from './ui/templatesCommand.js';
+import { DevController } from './ui/devController.js';
 import {
   CONFIG_SECTION,
   deleteSecret,
@@ -57,12 +60,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   watcher.onDidChange(() => tree.refresh(), undefined, context.subscriptions);
   context.subscriptions.push(watcher);
 
+  const dev = new DevController({ repoUri: folder.uri, log, refresh: () => tree.refresh() });
+  context.subscriptions.push(dev, ...dev.register());
+
   // Un changement de dossier de travail recrée le WorkDir du panneau.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(CONFIG_SECTION, folder.uri)) {
+      if (event.affectsConfiguration(`${CONFIG_SECTION}.workDir`, folder.uri)) {
         const next = readConfig(folder.uri);
         tree.setWorkDir(new WorkDir(vscode.Uri.joinPath(folder.uri, next.workDir).fsPath));
+        dev.onWorkDirChanged();
       }
     })
   );
@@ -137,6 +144,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Vérification silencieuse au démarrage : elle ne parle qu'en cas de problème.
   void reportClaudeStatus(folder.uri, log, false);
+  void dev.start().catch((err: unknown) => {
+    log.error(`Reprise du flux de dev : ${err instanceof Error ? err.message : String(err)}`);
+  });
   log.info(`DevBots actif sur ${folder.name} (source : ${sourceLabel(config.sourceKind)}).`);
 }
 

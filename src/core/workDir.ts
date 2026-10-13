@@ -2,9 +2,9 @@
  * Lecture et écriture du dossier `.work`.
  *
  * Le format existant ne change pas : `new/`, `ready/`, `done/` contiennent une
- * fiche markdown par story, `features/` les features saisies à la main, `plans/`
- * garde les ateliers de planification, et `state.json` (phase 3) tiendra l'état
- * du flux.
+ * fiche markdown par story, `features/` les features, `plans/` garde les
+ * ateliers de planification, `runs/` les journaux, CR et rapports du dev, et
+ * `state.json` le parcours des stories après Ready.
  */
 
 import { promises as fs } from 'node:fs';
@@ -136,15 +136,46 @@ export class WorkDir {
     parent: string | null,
     createdAt = new Date()
   ): Promise<CreatedCard> {
+    return this.createLocalCard('new', title, (id) =>
+      renderLocalStoryCard({ id, title, parent, createdAt })
+    );
+  }
+
+  /**
+   * Écrit une fiche `LOCAL-<n>` dans `new/` ou `ready/`, rendue par `render`
+   * une fois l'identifiant attribué. Sert aux fiches nées du tri des problèmes.
+   */
+  async createLocalCard(
+    folder: 'new' | 'ready',
+    title: string,
+    render: (id: string) => string
+  ): Promise<CreatedCard> {
     await this.ensureFolders();
     const taken = [...(await this.indexBySourceId()).keys(), ...(await this.planIds())];
     const id = nextLocalId(LOCAL_STORY_PREFIX, taken);
-    const filePath = path.join(this.folderPath('new'), cardFileName(id, title));
-    await fs.writeFile(filePath, renderLocalStoryCard({ id, title, parent, createdAt }), {
-      encoding: 'utf8',
-      flag: 'wx'
-    });
+    const filePath = path.join(this.folderPath(folder), cardFileName(id, title));
+    // `wx` : une fiche existante n'est jamais écrasée.
+    await fs.writeFile(filePath, render(id), { encoding: 'utf8', flag: 'wx' });
     return { id, filePath };
+  }
+
+  /** La fiche d'une story, où qu'elle soit dans le flux. */
+  async findStory(id: string): Promise<StoryFile | undefined> {
+    return (await this.indexBySourceId()).get(id);
+  }
+
+  /** Dossier des exécutions : `.work/runs/<id>/` (journal, CR, rapport). */
+  runsPath(): string {
+    return path.join(this.root, 'runs');
+  }
+
+  /** `.work/state.json` : l'état du flux après Ready. */
+  statePath(): string {
+    return path.join(this.root, 'state.json');
+  }
+
+  get rootPath(): string {
+    return this.root;
   }
 
   /** Les dossiers d'atelier de `plans/`, nommés d'après l'identifiant de la story. */

@@ -6,6 +6,7 @@
  */
 
 import * as vscode from 'vscode';
+import { DEFAULT_ALLOWED_COMMANDS } from '../core/devEnv.js';
 import type { SourceKind } from '../core/model.js';
 
 export const CONFIG_SECTION = 'devbots';
@@ -31,6 +32,16 @@ export interface DevBotsConfig {
   planningTemplate: string;
   planningModel: string;
   planningMaxResumes: number;
+  devSkill: string;
+  /** Modèle imposé à l'agent de dev. Vide : celui que recommande le plan. */
+  devModel: string;
+  devAllowedCommands: string[];
+  devInstallCommand: string;
+  devRulesFile: string;
+  gitBaseBranch: string;
+  worktreeRoot: string;
+  supervisionModel: string;
+  supervisionMaxLoops: number;
 }
 
 export function readConfig(scope?: vscode.Uri): DevBotsConfig {
@@ -49,7 +60,16 @@ export function readConfig(scope?: vscode.Uri): DevBotsConfig {
     planningSkill: cfg.get<string>('planning.skill', '').trim().replace(/^\//, ''),
     planningTemplate: cfg.get<string>('planning.template', '').trim(),
     planningModel: cfg.get<string>('planning.model', 'opus').trim(),
-    planningMaxResumes: cfg.get<number>('planning.maxResumes', 20)
+    planningMaxResumes: cfg.get<number>('planning.maxResumes', 20),
+    devSkill: cfg.get<string>('dev.skill', '').trim().replace(/^\//, ''),
+    devModel: cfg.get<string>('dev.model', '').trim(),
+    devAllowedCommands: cfg.get<string[]>('dev.allowedCommands', DEFAULT_ALLOWED_COMMANDS),
+    devInstallCommand: cfg.get<string>('dev.installCommand', '').trim(),
+    devRulesFile: cfg.get<string>('dev.rulesFile', '').trim(),
+    gitBaseBranch: cfg.get<string>('git.baseBranch', '').trim(),
+    worktreeRoot: cfg.get<string>('worktrees.root', '').trim(),
+    supervisionModel: cfg.get<string>('supervision.model', 'opus').trim(),
+    supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 3)
   };
 }
 
