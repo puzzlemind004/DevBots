@@ -1,0 +1,213 @@
+{
+  "name": "devbots",
+  "displayName": "DevBots",
+  "description": "Flux de dev guidé dans VS Code : import des tickets, planification, agents Claude Code, review et merge.",
+  "version": "0.1.0",
+  "publisher": "alpidev",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.108.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.work"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "DevBots",
+      "properties": {
+        "devbots.source.kind": {
+          "type": "string",
+          "enum": [
+            "github",
+            "azureDevOps"
+          ],
+          "enumDescriptions": [
+            "Issues GitHub (issue parente et sub-issues)",
+            "Work items Azure DevOps (epic, feature, user story)"
+          ],
+          "default": "github",
+          "markdownDescription": "Source des tickets pour ce dépôt.",
+          "scope": "resource"
+        },
+        "devbots.github.repository": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Dépôt GitHub des issues, au format `owner/repo`. Vide : déduit du remote `origin`.",
+          "scope": "resource"
+        },
+        "devbots.azureDevOps.orgUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "URL de l'organisation, par exemple `https://dev.azure.com/mon-org` (Services) ou `https://ado.interne/tfs/DefaultCollection` (Server).",
+          "scope": "resource"
+        },
+        "devbots.azureDevOps.project": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Nom du projet Azure DevOps.",
+          "scope": "resource"
+        },
+        "devbots.workDir": {
+          "type": "string",
+          "default": ".work",
+          "markdownDescription": "Dossier du flux, relatif à la racine du dépôt.",
+          "scope": "resource"
+        },
+        "devbots.import.downloadAssets": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Télécharger les images et pièces jointes des tickets dans un sous-dossier `assets` de la story.",
+          "scope": "resource"
+        },
+        "devbots.import.githubTrustedAuthorsOnly": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "N'importer que les issues dont tu es l'auteur, ou qui portent un label de confiance. Protège des dépôts publics où n'importe qui ouvre une issue.",
+          "scope": "resource"
+        },
+        "devbots.import.githubTrustedLabel": {
+          "type": "string",
+          "default": "devbots",
+          "markdownDescription": "Label qui marque une issue comme validée pour l'import, en plus de tes propres issues.",
+          "scope": "resource"
+        },
+        "devbots.agents.maxParallel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2,
+          "markdownDescription": "Nombre maximal d'agents de dev en parallèle. Un build Angular consomme beaucoup de mémoire : à régler selon la machine, pas seulement selon le quota.",
+          "scope": "window"
+        },
+        "devbots.claude.executable": {
+          "type": "string",
+          "default": "claude",
+          "markdownDescription": "Commande du CLI Claude Code.",
+          "scope": "window"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devbots",
+          "title": "DevBots",
+          "icon": "resources/devbots.svg"
+        }
+      ]
+    },
+    "views": {
+      "devbots": [
+        {
+          "id": "devbots.flow",
+          "name": "Flux",
+          "icon": "resources/devbots.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "devbots.flow",
+        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\nLes stories importées arrivent dans `.work/new`."
+      }
+    ],
+    "commands": [
+      {
+        "command": "devbots.importTickets",
+        "title": "DevBots : importer des tickets",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "devbots.refresh",
+        "title": "DevBots : rafraîchir le flux",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "devbots.openStory",
+        "title": "DevBots : ouvrir la fiche"
+      },
+      {
+        "command": "devbots.openInSource",
+        "title": "DevBots : ouvrir dans la source",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "devbots.setToken",
+        "title": "DevBots : enregistrer un jeton d'accès"
+      },
+      {
+        "command": "devbots.clearToken",
+        "title": "DevBots : effacer le jeton d'accès"
+      },
+      {
+        "command": "devbots.checkClaude",
+        "title": "DevBots : vérifier l'installation de Claude Code"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "devbots.importTickets",
+          "when": "view == devbots.flow",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devbots.refresh",
+          "when": "view == devbots.flow",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devbots.openInSource",
+          "when": "view == devbots.flow && viewItem =~ /story/",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "devbots.openStory",
+          "when": "false"
+        },
+        {
+          "command": "devbots.openInSource",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run check && npm run build",
+    "build": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.0",
+    "@types/turndown": "^5.0.5",
+    "@types/vscode": "^1.108.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.4"
+  },
+  "dependencies": {
+    "azure-devops-node-api": "^17.0.1",
+    "gray-matter": "^4.0.3",
+    "octokit": "^5.0.5",
+    "turndown": "^7.2.4"
+  }
+}

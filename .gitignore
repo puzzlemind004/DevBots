@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+*.vsix
+.vscode-test/
+coverage/
+
+# Le flux de travail est propre à chaque poste
+.work/
