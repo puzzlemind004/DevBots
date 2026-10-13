@@ -59,7 +59,7 @@ import {
 } from './supervision.js';
 import { resolveTemplate } from './templates.js';
 import type { StoryFile, WorkDir } from './workDir.js';
-import { exec } from '../util/exec.js';
+import { exec, ExecError } from '../util/exec.js';
 
 /** Outils de la revue et des étapes de supervision : lecture seule par défaut. */
 export const REVIEW_TOOLS = ['Read', 'Grep', 'Glob'] as const;
@@ -90,12 +90,23 @@ export interface DevSettings {
   reviewModel: string;
   /** Plafond de boucles de correction, quand `supervision.json` n'en fixe pas. */
   maxLoops: number;
+  /**
+   * Commandes relancées au merge quand la branche de la feature a avancé
+   * depuis la revue (build, tests). Vide : aucune.
+   */
+  mergeChecks: string[];
 }
 
 export type OrchestratorEvent =
   | { kind: 'changed' }
   | { kind: 'awaitingHuman'; storyId: string; title: string }
-  | { kind: 'blocked'; storyId: string; title: string; reason: string };
+  | { kind: 'blocked'; storyId: string; title: string; reason: string }
+  /** Mergée ; `warning` dit ce que le nettoyage n'a pas pu faire. */
+  | { kind: 'merged'; storyId: string; title: string; into: string; warning?: string }
+  /** Le merge a buté (conflit, check en échec) : la story repart chez l'agent. */
+  | { kind: 'returned'; storyId: string; title: string; reason: string }
+  /** Le merge n'a pas pu se faire : la story reste à valider. */
+  | { kind: 'mergeFailed'; storyId: string; title: string; reason: string };
 
 export interface OrchestratorDeps {
   repoRoot: string;
@@ -108,6 +119,8 @@ export interface OrchestratorDeps {
   onEvent?: (event: OrchestratorEvent) => void;
   /** Installe les dépendances d'un worktree neuf. Par défaut, la commande détectée. */
   install?: (dir: string, command: string[]) => Promise<void>;
+  /** Lance un check de merge dans le worktree. Par défaut, la commande passe par le shell. */
+  check?: (dir: string, command: string) => Promise<void>;
   /** Horloge, pour les tests. */
   now?: () => Date;
 }
@@ -120,6 +133,8 @@ export class Orchestrator {
   private readonly running = new Map<string, AbortController>();
   private readonly pipelines = new Set<Promise<void>>();
   private pumping: Promise<void> = Promise.resolve();
+  /** Les merges s'enchaînent : un seul à la fois. */
+  private merging: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.git = new Git(deps.repoRoot);
@@ -214,11 +229,13 @@ export class Orchestrator {
     }
   }
 
-  /** Attend que plus rien ne tourne : ni story en cours, ni lancement en préparation. */
+  /** Attend que plus rien ne tourne : ni story en cours, ni lancement en préparation, ni merge. */
   async whenIdle(): Promise<void> {
+    await this.merging;
     while (this.pipelines.size > 0) {
       await Promise.allSettled([...this.pipelines]);
       await this.pumping;
+      await this.merging;
     }
     await this.pumping;
   }
@@ -243,8 +260,87 @@ export class Orchestrator {
   }
 
   /**
+   * Tes retours de revue : ils repartent à l'agent, dans sa session, et la
+   * story refait le parcours (revue du CR, supervision) jusqu'à « À valider ».
+   * Tes retouches dans le worktree sont commitées avec son travail.
+   */
+  async sendFeedback(storyId: string, feedback: string): Promise<void> {
+    const text = feedback.trim();
+    if (!text) {
+      throw new Error('Retours vides : rien à renvoyer.');
+    }
+    await this.deps.store.update((state) => {
+      const run = state.stories[storyId];
+      if (!run || run.status !== 'awaiting_human') {
+        throw new Error(`La story ${storyId} n'attend pas ta revue.`);
+      }
+      Object.assign(run, {
+        status: 'queued',
+        loops: 0,
+        reason: undefined,
+        pendingCorrections: `Retours de la revue humaine, prioritaires :\n\n${text}`,
+        queuedAt: this.now().toISOString(),
+        updatedAt: this.now().toISOString()
+      } satisfies Partial<StoryRun>);
+    });
+    await this.journal(storyId, `Retours de ta revue :\n${text}`);
+    this.changed();
+    await this.pump();
+  }
+
+  /**
+   * Ton feu vert. Les merges passent un par un : la story attend son tour,
+   * puis `merge` l'intègre à la branche de sa feature. Rend la main une fois
+   * le merge fait, ou la story renvoyée.
+   */
+  async approve(storyId: string): Promise<void> {
+    await this.deps.store.update((state) => {
+      const run = state.stories[storyId];
+      if (!run || run.status !== 'awaiting_human') {
+        throw new Error(`La story ${storyId} n'attend pas ton feu vert.`);
+      }
+      run.status = 'merging';
+      run.reason = 'en attente de son tour de merge';
+      run.updatedAt = this.now().toISOString();
+    });
+    this.changed();
+    const next = this.merging.then(() => this.merge(storyId));
+    this.merging = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Le port de l'application lancée pour ta revue : propre au worktree, et
+   * stable d'un lancement à l'autre. Le premier libre à partir de `basePort`.
+   */
+  async assignPort(storyId: string, basePort: number): Promise<number> {
+    return this.deps.store.update((state) => {
+      const run = state.stories[storyId];
+      if (!run) {
+        throw new Error(`La story ${storyId} n'est pas dans le flux de dev.`);
+      }
+      if (run.servePort) {
+        return run.servePort;
+      }
+      const taken = new Set(
+        Object.values(state.stories)
+          .filter((r) => r.storyId !== storyId && r.status !== 'done')
+          .map((r) => r.servePort)
+      );
+      let port = basePort;
+      while (taken.has(port)) {
+        port += 1;
+      }
+      run.servePort = port;
+      return port;
+    });
+  }
+
+  /**
    * Au démarrage : une story restée en cours appartenait à un processus mort
-   * avec la fenêtre précédente. Elle passe bloquée, à relancer.
+   * avec la fenêtre précédente. Elle passe bloquée, à relancer. Un merge
+   * interrompu revient « À valider » : le prochain feu vert annule le rebase
+   * laissé en plan et reprend.
    */
   async recover(): Promise<string[]> {
     const interrupted = await this.deps.store.update((state) => {
@@ -255,13 +351,15 @@ export class Orchestrator {
           run.reason = 'Interrompue par la fermeture de VS Code.';
           run.updatedAt = this.now().toISOString();
           ids.push(run.storyId);
+        } else if (run.status === 'merging') {
+          run.status = 'awaiting_human';
+          run.reason = 'Merge interrompu par la fermeture de VS Code : redonne ton feu vert.';
+          run.updatedAt = this.now().toISOString();
         }
       }
       return ids;
     });
-    if (interrupted.length > 0) {
-      this.changed();
-    }
+    this.changed();
     return interrupted;
   }
 
@@ -628,9 +726,20 @@ export class Orchestrator {
     const followUps: string[] = [];
     const stepOf = (issue: (typeof sorted.complex)[number]) =>
       results.find((r) => r.issues.includes(issue))?.step ?? 'supervision';
+    // Après tes retours ou un conflit, la supervision repasse et retrouve
+    // souvent les mêmes problèmes : une fiche déjà née de cette story suffit.
+    const known = new Set(
+      [...(await this.deps.workDir.indexBySourceId()).values()]
+        .filter((s) => s.frontmatter.origin_story === run.storyId)
+        .map((s) => s.title.trim().toLowerCase())
+    );
 
     for (const [folder, issues] of [['new', sorted.complex], ['ready', sorted.simple]] as const) {
       for (const issue of issues) {
+        if (known.has(issue.title.trim().toLowerCase())) {
+          await this.journal(run.storyId, `Tri : « ${issue.title} » a déjà sa fiche.`);
+          continue;
+        }
         const created = await this.deps.workDir.createLocalCard(folder, issue.title, (id) =>
           renderFollowUpCard({
             id,
@@ -655,6 +764,134 @@ export class Orchestrator {
     });
     await this.journal(run.storyId, 'Prête pour ta revue.');
     this.deps.onEvent?.({ kind: 'awaitingHuman', storyId: run.storyId, title: run.title });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Merge                                                             */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Le merge d'une story, après ton feu vert : intégration de la branche de
+   * la feature si elle a avancé, checks, fast-forward de la branche de la
+   * feature, suppression du worktree et de la branche de story, fiche dans
+   * `done/`.
+   *
+   * Un conflit ou un check en échec renvoie la story à l'agent, qui repasse
+   * ensuite par la revue. Un échec du merge lui-même la laisse « À valider ».
+   */
+  private async merge(storyId: string): Promise<void> {
+    const run = (await this.deps.store.read()).stories[storyId];
+    if (!run || run.status !== 'merging') {
+      return; // Retirée du flux en attendant son tour.
+    }
+    await this.deps.store.patch(storyId, { reason: undefined });
+    this.changed();
+    const cwd = run.worktree;
+    const base = run.baseBranch;
+    try {
+      await this.journal(storyId, `Feu vert : merge dans ${base}.`);
+      if (await this.git.abortInProgress(cwd)) {
+        await this.journal(storyId, 'Rebase ou merge laissé en plan par un arrêt : annulé.');
+      }
+      const touchUp = await this.git.commitAll(cwd, `${storyId} : retouches de revue`);
+      if (touchUp) {
+        await this.journal(storyId, `Tes retouches commitées : ${touchUp.slice(0, 8)}.`);
+      }
+
+      if (!(await this.git.isAncestor(base, 'HEAD', cwd))) {
+        await this.journal(storyId, `${base} a avancé depuis le départ de la story : intégration.`);
+        const conflicts = await this.git.integrate(cwd, base);
+        if (conflicts.length > 0) {
+          return await this.sendBack(run, conflictCorrections(base, conflicts), `conflit avec ${base} dans ${conflicts.join(', ')}`);
+        }
+        for (const command of this.deps.settings().mergeChecks) {
+          await this.journal(storyId, `Check : ${command}`);
+          const failure = await this.runCheck(cwd, command);
+          if (failure !== undefined) {
+            return await this.sendBack(
+              run,
+              `Après l'intégration de ${base}, « ${command} » échoue :\n\n${failure}`,
+              `« ${command} » échoue après l'intégration de ${base}`
+            );
+          }
+        }
+      }
+
+      const mergeBase = await this.git.run(['rev-parse', base]);
+      const head = await this.git.headCommit(cwd);
+      await this.git.fastForward(base, head);
+      await this.journal(storyId, `Mergée dans ${base} : ${head.slice(0, 8)}.`);
+
+      const warnings: string[] = [];
+      try {
+        await this.git.removeWorktree(cwd);
+        await this.journal(storyId, `Worktree ${cwd} supprimé.`);
+      } catch (err) {
+        warnings.push(`worktree ${cwd} non supprimé (${errorMessage(err)})`);
+      }
+      try {
+        await this.git.deleteBranch(run.branch);
+        await this.journal(storyId, `Branche ${run.branch} supprimée.`);
+      } catch (err) {
+        warnings.push(`branche ${run.branch} non supprimée (${errorMessage(err)})`);
+      }
+
+      const mergedAt = this.now().toISOString();
+      const story = await this.readyStory(storyId);
+      await this.deps.workDir.moveToDone(story, { merged_at: mergedAt, merge_commit: head, merged_into: base });
+      const warning = warnings.length > 0 ? `À finir à la main : ${warnings.join(' ; ')}.` : undefined;
+      if (warning) {
+        await this.journal(storyId, warning);
+      }
+      await this.deps.store.patch(storyId, {
+        status: 'done',
+        mergedAt,
+        mergeCommit: head,
+        mergeBase,
+        servePort: undefined,
+        reason: warning
+      });
+      this.deps.onEvent?.({ kind: 'merged', storyId, title: run.title, into: base, warning });
+      this.changed();
+      // Les fichiers de la story sont libérés, ses dépendantes peuvent partir.
+      await this.pump();
+    } catch (err) {
+      const reason = `Merge impossible : ${errorMessage(err)}`;
+      await this.journal(storyId, reason);
+      await this.deps.store.patch(storyId, { status: 'awaiting_human', reason });
+      this.deps.onEvent?.({ kind: 'mergeFailed', storyId, title: run.title, reason });
+      this.changed();
+    }
+  }
+
+  /** Le merge a buté : la story repart chez l'agent, dans sa session, avec de quoi corriger. */
+  private async sendBack(run: StoryRun, corrections: string, reason: string): Promise<void> {
+    await this.deps.store.patch(run.storyId, {
+      status: 'queued',
+      loops: 0,
+      reason: undefined,
+      pendingCorrections: corrections,
+      queuedAt: this.now().toISOString()
+    });
+    await this.journal(run.storyId, `Renvoyée à l'agent : ${reason}.`);
+    this.deps.onEvent?.({ kind: 'returned', storyId: run.storyId, title: run.title, reason });
+    this.changed();
+    await this.pump();
+  }
+
+  /** Lance un check ; rend la fin de sa sortie s'il échoue, `undefined` s'il passe. */
+  private async runCheck(cwd: string, command: string): Promise<string | undefined> {
+    try {
+      if (this.deps.check) {
+        await this.deps.check(cwd, command);
+      } else {
+        await exec(command, [], { cwd, shell: true });
+      }
+      return undefined;
+    } catch (err) {
+      const output = err instanceof ExecError ? `${err.result.stdout}\n${err.result.stderr}` : errorMessage(err);
+      return output.trim().split('\n').slice(-40).join('\n') || errorMessage(err);
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -813,7 +1050,7 @@ export class Orchestrator {
 
 function correctionPrompt(corrections: string): string {
   return [
-    'Corrections demandées par la supervision :',
+    'Corrections demandées :',
     '',
     corrections,
     '',
@@ -868,6 +1105,22 @@ function stepPrompt(run: StoryRun, step: SupervisionStep, changed: string[]): st
     '- none : pour information.'
   );
   return lines.join('\n');
+}
+
+/** Les conflits laissés par l'intégration de la branche de la feature, à résoudre par l'agent. */
+function conflictCorrections(base: string, conflicts: string[]): string {
+  return [
+    `La branche ${base} a avancé pendant ta story. L'extension a commencé à l'intégrer dans ta branche : le merge est en cours, avec des conflits dans :`,
+    '',
+    ...conflicts.map((f) => `- ${f}`),
+    '',
+    'Résous chaque conflit dans le fichier en gardant les deux intentions (ton travail et ce qui est arrivé sur la feature), et retire tous les marqueurs <<<<<<<, ======= et >>>>>>>.',
+    "Ne lance aucune commande git d'écriture : l'extension conclut le merge en commitant ton travail."
+  ].join('\n');
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** `Bash(npm run lint:*)` donne `Bash` : l'outil à rendre disponible pour la règle. */

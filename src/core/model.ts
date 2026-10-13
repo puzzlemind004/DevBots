@@ -89,6 +89,10 @@ export interface StoryFrontmatter {
   origin?: string;
   /** La story dont la supervision a fait naître cette fiche. */
   origin_story?: string;
+  /** Écrits au merge, quand la fiche passe dans `done/`. */
+  merged_at?: string;
+  merge_commit?: string;
+  merged_into?: string;
 }
 
 export type SourceKind = 'github' | 'azureDevOps';

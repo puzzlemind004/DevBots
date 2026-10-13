@@ -25,10 +25,10 @@ src/
 │   ├── planning.ts     L'atelier de planification, sans interface
 │   ├── flowState.ts    state.json : le parcours des stories après Ready
 │   ├── schedule.ts     Ordonnancement : dépendances retenues, fichiers occupés
-│   ├── git.ts          Branches, worktrees, commits, diff
+│   ├── git.ts          Branches, worktrees, commits, diff, intégration, fast-forward
 │   ├── devEnv.ts       Installation des dépendances, commandes autorisées
 │   ├── supervision.ts  supervision.json, schémas, tri, fiches du tri, rapport
-│   └── orchestrator.ts De Ready à « À valider » : file, dev, revue, supervision
+│   └── orchestrator.ts De Ready à Done : file, dev, revue, supervision, merge
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
 │   ├── azureDevOps.ts  Work items ouverts, epic / feature → user stories
@@ -39,7 +39,8 @@ src/
 │   ├── localCardCommands.ts Nouvelle story, nouvelle feature
 │   ├── templatesCommand.ts Personnaliser les gabarits
 │   ├── planningPanel.ts L'onglet de l'atelier (webview)
-│   └── devController.ts Dev et supervision : commandes, journaux, barre d'état
+│   ├── devController.ts Dev, supervision et revue : commandes, journaux, barre d'état
+│   └── storyDiff.ts    Le diff d'une story dans la vue native, contenu lu par git show
 └── util/
     ├── config.ts       Paramètres et SecretStorage
     ├── exec.ts         Lancement de processus (git, claude)
@@ -166,7 +167,7 @@ l'état. Le détail est dans [Planification](planification.md).
 
 ## Orchestrateur
 
-`core/orchestrator.ts` tient le parcours de Ready à « À valider » sans rien
+`core/orchestrator.ts` tient le parcours de Ready à Done sans rien
 savoir de VS Code ; `ui/devController.ts` relaie tes gestes et affiche les
 événements. Le détail est dans [Dev et supervision](dev-et-supervision.md).
 
@@ -181,9 +182,7 @@ savoir de VS Code ; `ui/devController.ts` relaie tes gestes et affiche les
   fois.
 - Les tests de l'orchestrateur tournent sur un vrai dépôt git temporaire, avec
   un faux CLI.
-
-## Ce qui viendra
-
-- La carte « À valider » (phase 4) : ouvrir le worktree, diff natif, retours à
-  l'agent dans sa session, feu vert, merge séquentiel avec rebase, nettoyage
-  du worktree et de la branche, passage dans `done/`.
+- Les merges s'enchaînent dans une seule file (`approve`), indépendante de
+  celle des agents : jamais deux merges à la fois. Un conflit ou un check en
+  échec remet la story dans la file des agents, avec ses corrections. Le
+  détail est dans [Review et merge](review-et-merge.md).

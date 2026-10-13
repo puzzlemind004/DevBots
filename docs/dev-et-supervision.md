@@ -181,9 +181,7 @@ dossiers restent la source de vérité pour New, Ready et Done.
 La barre d'état indique les agents actifs, les stories en file et celles qui
 attendent ta revue.
 
-## Ce qui viendra en phase 4
+## Ensuite
 
-Ouvrir le worktree, voir le diff, renvoyer des retours, le feu vert et le
-merge séquentiel avec rebase. D'ici là, une story « À valider » se relit et se
-merge à la main depuis son worktree ; « Retirer du flux de dev » libère ensuite
-ses fichiers pour les stories qui les attendent.
+Une story « À valider » se relit depuis sa carte : diff, worktree, retours,
+feu vert et merge. Voir [Review et merge](review-et-merge.md).

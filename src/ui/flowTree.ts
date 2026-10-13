@@ -124,8 +124,9 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
     for (const folder of ['new', 'ready', 'done'] as const) {
       for (const story of await this.workDir.listStories(folder)) {
         const id = story.frontmatter.source_id;
-        const run = folder === 'ready' ? state.stories[id] : undefined;
-        const group: FlowGroup = run ? groupOf(run.status) : folder;
+        // Une story mergée garde son parcours : CR, rapport, journal et diff restent consultables.
+        const run = folder === 'new' ? undefined : state.stories[id];
+        const group: FlowGroup = run && folder === 'ready' ? groupOf(run.status) : folder;
         byGroup.get(group)!.push({
           kind: 'story',
           story,
@@ -317,6 +318,8 @@ function runTooltip(story: StoryFile, run: StoryRun): vscode.MarkdownString {
     `- État : ${statusLabel(run.status)}`,
     `- Modèle : ${run.model}`,
     run.branch ? `- Branche : \`${run.branch}\` sur \`${run.baseBranch}\`` : undefined,
+    run.mergeCommit ? `- Mergée le ${run.mergedAt?.slice(0, 10) ?? '?'} : \`${run.mergeCommit.slice(0, 8)}\`` : undefined,
+    run.servePort ? `- Application : http://localhost:${run.servePort}` : undefined,
     run.loops > 0 ? `- Boucles de correction : ${run.loops}` : undefined,
     dev ? `- Build : ${dev.build} · tests : ${dev.tests} · lint : ${dev.lint}` : undefined,
     run.followUps.length > 0 ? `- Fiches créées par le tri : ${run.followUps.join(', ')}` : undefined,

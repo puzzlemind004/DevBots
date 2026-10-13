@@ -122,7 +122,8 @@ describe('Orchestrator', () => {
       installCommand: 'none',
       rulesFile: '',
       reviewModel: 'opus',
-      maxLoops: 2
+      maxLoops: 2,
+      mergeChecks: []
     };
     store = new FlowStateStore(path.join(work, 'state.json'));
     orchestrator = new Orchestrator({
@@ -412,5 +413,260 @@ describe('Orchestrator', () => {
     });
     expect(await orchestrator.recover()).toEqual(['42']);
     expect((await store.read()).stories['42']).toMatchObject({ status: 'blocked' });
+  });
+
+  // De vrais rebases et merges git, lents sous Windows : de la marge.
+  describe('revue humaine et merge', { timeout: 20000 }, () => {
+    const FEATURE = 'feature/LOCAL-F1-inscription';
+
+    /** Mène 42 jusqu'à « À valider », sur `src/email.ts`. */
+    async function toReview(content = 'export const ok = true;\n'): Promise<void> {
+      await addReady('42', ['src/email.ts']);
+      claude.dev.push(devWrites('src/email.ts', content));
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.enqueue('42', 'sonnet');
+      expect(await settle('42')).toBe('awaiting_human');
+    }
+
+    /** Un commit sur la branche de la feature, fait à côté pendant la revue. */
+    async function advanceFeature(file: string, content: string): Promise<void> {
+      await git(repo, 'checkout', '--quiet', FEATURE);
+      await fs.mkdir(path.dirname(path.join(repo, file)), { recursive: true });
+      await fs.writeFile(path.join(repo, file), content, 'utf8');
+      await git(repo, 'add', '--all');
+      await git(repo, 'commit', '--quiet', '-m', `feature : ${file}`);
+    }
+
+    function withChecks(check: (dir: string, command: string) => Promise<void>): void {
+      orchestrator = new Orchestrator({
+        repoRoot: repo,
+        workDir: new WorkDir(work),
+        store,
+        stream: claude.run,
+        settings: () => settings,
+        onEvent: (e) => events.push(e),
+        check
+      });
+    }
+
+    it('merge dans la branche de la feature, nettoie et range la fiche dans Done', async () => {
+      await toReview();
+      const { worktree, branch } = (await store.read()).stories['42']!;
+
+      await orchestrator.approve('42');
+
+      const run = (await store.read()).stories['42']!;
+      expect(run.status).toBe('done');
+      expect(run.reason).toBeUndefined();
+      expect(await git(repo, 'rev-parse', FEATURE)).toBe(run.mergeCommit);
+      expect(await git(repo, 'show', `${FEATURE}:src/email.ts`)).toBe('export const ok = true;');
+      // La feature n'était pas extraite : le dépôt reste sur main, intact.
+      expect(await git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+      await expect(fs.access(path.join(repo, 'src', 'email.ts'))).rejects.toThrow();
+
+      await expect(fs.access(worktree)).rejects.toThrow();
+      expect(await git(repo, 'branch', '--list', branch)).toBe('');
+      await expect(fs.access(path.join(work, 'ready', '42-story.md'))).rejects.toThrow();
+      const done = matter(await fs.readFile(path.join(work, 'done', '42-story.md'), 'utf8'));
+      expect(done.data).toMatchObject({ merge_commit: run.mergeCommit, merged_into: FEATURE });
+      expect(done.content).toContain('## Étapes');
+      expect(events).toContainEqual({ kind: 'merged', storyId: '42', title: 'Story 42', into: FEATURE, warning: undefined });
+    });
+
+    it('libère les fichiers de la story : celle qui les attendait part', async () => {
+      await toReview();
+      await addReady('43', ['src/email.ts']);
+      await orchestrator.enqueue('43', 'sonnet');
+      expect((await store.read()).stories['43']!.status).toBe('queued');
+
+      claude.dev.push(devWrites('src/email.ts', 'export const ok = 43;\n'));
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.approve('42');
+      expect(await settle('43')).toBe('awaiting_human');
+      // 43 part de la feature, où 42 est déjà mergée.
+      const run43 = (await store.read()).stories['43']!;
+      expect(await git(run43.worktree, 'log', '--format=%s', '-2')).toBe('43 : Story 43\n42 : Story 42');
+    });
+
+    it("intègre la feature qui a avancé par un rebase, relance les checks, et avance la branche extraite", async () => {
+      const checks: string[] = [];
+      withChecks(async (_dir, command) => {
+        checks.push(command);
+      });
+      settings.mergeChecks = ['npm run build', 'npm test'];
+      await toReview();
+      await advanceFeature('docs/notes.md', '# Notes\n');
+
+      await orchestrator.approve('42');
+
+      expect((await store.read()).stories['42']!.status).toBe('done');
+      expect(checks).toEqual(['npm run build', 'npm test']);
+      // Historique linéaire : la story est rebasée sur la feature.
+      expect(await git(repo, 'log', '--format=%s', '-3', FEATURE)).toBe('42 : Story 42\nfeature : docs/notes.md\ninit');
+      expect(await git(repo, 'rev-list', '--merges', `main..${FEATURE}`)).toBe('');
+      // La feature est extraite dans le dépôt : son arbre de travail suit.
+      expect(await fs.readFile(path.join(repo, 'src', 'email.ts'), 'utf8')).toContain('export const ok = true;');
+    });
+
+    it('ne relance pas les checks quand la feature n’a pas bougé', async () => {
+      const checks: string[] = [];
+      withChecks(async (_dir, command) => {
+        checks.push(command);
+      });
+      settings.mergeChecks = ['npm test'];
+      await toReview();
+      await orchestrator.approve('42');
+      expect((await store.read()).stories['42']!.status).toBe('done');
+      expect(checks).toEqual([]);
+    });
+
+    it("renvoie un check en échec à l'agent, puis merge au feu vert suivant", async () => {
+      withChecks(async () => {
+        throw new Error('2 tests en échec');
+      });
+      settings.mergeChecks = ['npm test'];
+      await toReview();
+      await advanceFeature('docs/notes.md', '# Notes\n');
+
+      claude.dev.push(devWrites('src/email.ts', 'export const ok = 2;\n'));
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.approve('42');
+      expect(events.some((e) => e.kind === 'returned' && e.reason.includes('npm test'))).toBe(true);
+      expect(await settle('42')).toBe('awaiting_human');
+      const devs = claude.requests.filter((r) => r.schema === DEV_SCHEMA);
+      expect(devs[1]!.resume).toBe('session-1');
+      expect(devs[1]!.prompt).toContain('« npm test » échoue');
+      expect(devs[1]!.prompt).toContain('2 tests en échec');
+
+      // La story contient déjà la feature : pas de nouvelle intégration, pas de check.
+      await orchestrator.approve('42');
+      expect((await store.read()).stories['42']!.status).toBe('done');
+    });
+
+    it("renvoie un conflit à l'agent, qui le résout ; le merge conclut ensuite", async () => {
+      await toReview('export const ok = true;\n');
+      await advanceFeature('src/email.ts', 'export const ok = false;\n');
+
+      // L'agent trouve les marqueurs, et les résout.
+      let seen = '';
+      claude.dev.push(async (r) => {
+        seen = await fs.readFile(path.join(r.cwd, 'src/email.ts'), 'utf8');
+        return devWrites('src/email.ts', 'export const ok = !false;\n')(r);
+      });
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.approve('42');
+
+      expect(events.some((e) => e.kind === 'returned' && e.reason.includes('conflit'))).toBe(true);
+      expect(await settle('42')).toBe('awaiting_human');
+      expect(seen).toContain('<<<<<<<');
+      const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
+      expect(dev.resume).toBe('session-1');
+      expect(dev.prompt).toContain('- src/email.ts');
+      const run = (await store.read()).stories['42']!;
+      expect(await git(run.worktree, 'rev-list', '--merges', `${FEATURE}..HEAD`)).not.toBe('');
+
+      await git(repo, 'checkout', '--quiet', 'main');
+      await orchestrator.approve('42');
+      expect((await store.read()).stories['42']!.status).toBe('done');
+      expect(await git(repo, 'show', `${FEATURE}:src/email.ts`)).toBe('export const ok = !false;');
+    });
+
+    it('refuse de conclure un conflit qui garde ses marqueurs', async () => {
+      await toReview('export const ok = true;\n');
+      await advanceFeature('src/email.ts', 'export const ok = false;\n');
+
+      // Premier passage : l'agent ne touche à rien, le commit est refusé.
+      claude.dev.push(
+        async () => ({ status: 'done', summary: '', build: 'passed', tests: 'passed', tests_detail: '', lint: 'passed', blocked_reason: '' }),
+        devWrites('src/email.ts', 'export const ok = 1;\n')
+      );
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.approve('42');
+      expect(await settle('42')).toBe('awaiting_human');
+      const devs = claude.requests.filter((r) => r.schema === DEV_SCHEMA);
+      expect(devs[2]!.prompt).toContain('marqueurs de conflit restants dans src/email.ts');
+    });
+
+    it("renvoie tes retours à l'agent dans sa session, sans dupliquer les fiches du tri", async () => {
+      await addReady('42', ['src/email.ts']);
+      const issue = {
+        title: 'Extraire la constante',
+        description: 'Valeur magique.',
+        severity: 'minor',
+        file: 'src/email.ts',
+        line: 1,
+        classification: 'followup_complex',
+        mini_plan: ''
+      };
+      claude.dev.push(devWrites('src/email.ts'), devWrites('src/email.ts', 'export const valid = true;\n'));
+      claude.review.push(approved, approved);
+      claude.steps.push(() => ({ summary: '', issues: [issue] }), () => ({ summary: '', issues: [issue] }));
+      await orchestrator.enqueue('42', 'sonnet');
+      expect(await settle('42')).toBe('awaiting_human');
+
+      await orchestrator.sendFeedback('42', 'Renomme ok en valid.');
+      expect(await settle('42')).toBe('awaiting_human');
+
+      const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
+      expect(dev.resume).toBe('session-1');
+      expect(dev.prompt).toContain('Retours de la revue humaine');
+      expect(dev.prompt).toContain('Renomme ok en valid.');
+      expect((await store.read()).stories['42']!.followUps).toEqual(['LOCAL-1']);
+      expect(await fs.readdir(path.join(work, 'new'))).toEqual(['LOCAL-1-extraire-la-constante.md']);
+    });
+
+    it("n'accepte feu vert et retours que sur une story à valider", async () => {
+      await addReady('42', ['src/email.ts']);
+      await expect(orchestrator.approve('42')).rejects.toThrow("n'attend pas ton feu vert");
+      await expect(orchestrator.sendFeedback('42', 'x')).rejects.toThrow("n'attend pas ta revue");
+    });
+
+    it('donne à chaque worktree un port stable, sans doublon', async () => {
+      await store.update((s) => {
+        for (const id of ['42', '43']) {
+          s.stories[id] = {
+            storyId: id,
+            title: id,
+            status: 'awaiting_human',
+            model: 'sonnet',
+            baseBranch: 'main',
+            branch: `story/${id}`,
+            worktree: '',
+            loops: 0,
+            queuedAt: '',
+            updatedAt: '',
+            followUps: []
+          };
+        }
+      });
+      expect(await orchestrator.assignPort('42', 4201)).toBe(4201);
+      expect(await orchestrator.assignPort('43', 4201)).toBe(4202);
+      expect(await orchestrator.assignPort('42', 4201)).toBe(4201);
+    });
+
+    it('au redémarrage, un merge interrompu revient à valider', async () => {
+      await store.update((s) => {
+        s.stories['42'] = {
+          storyId: '42',
+          title: 'x',
+          status: 'merging',
+          model: 'sonnet',
+          baseBranch: 'main',
+          branch: 'story/42',
+          worktree: '',
+          loops: 0,
+          queuedAt: '',
+          updatedAt: '',
+          followUps: []
+        };
+      });
+      expect(await orchestrator.recover()).toEqual([]);
+      expect((await store.read()).stories['42']).toMatchObject({ status: 'awaiting_human' });
+    });
   });
 });

@@ -164,6 +164,24 @@ export class WorkDir {
     return (await this.indexBySourceId()).get(id);
   }
 
+  /**
+   * Passe une fiche dans `done/`, avec ce que le merge ajoute à son
+   * frontmatter. Le corps (la story et son plan) reste intact.
+   */
+  async moveToDone(
+    story: StoryFile,
+    merge: Pick<StoryFrontmatter, 'merged_at' | 'merge_commit' | 'merged_into'>
+  ): Promise<string> {
+    await this.ensureFolders();
+    const parsed = matter(await fs.readFile(story.filePath, 'utf8'));
+    const target = path.join(this.folderPath('done'), path.basename(story.filePath));
+    const data = { ...(parsed.data as Record<string, unknown>), ...merge };
+    // `wx` : une fiche de done/ n'est jamais écrasée.
+    await fs.writeFile(target, matter.stringify(parsed.content, data), { encoding: 'utf8', flag: 'wx' });
+    await fs.rm(story.filePath);
+    return target;
+  }
+
   /** Dossier des exécutions : `.work/runs/<id>/` (journal, CR, rapport). */
   runsPath(): string {
     return path.join(this.root, 'runs');

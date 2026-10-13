@@ -42,6 +42,10 @@ export interface DevBotsConfig {
   worktreeRoot: string;
   supervisionModel: string;
   supervisionMaxLoops: number;
+  mergeCheckCommands: string[];
+  /** Lance l'application d'un worktree pour ta revue ; `{port}` reçoit son port. */
+  reviewServeCommand: string;
+  reviewBasePort: number;
 }
 
 export function readConfig(scope?: vscode.Uri): DevBotsConfig {
@@ -69,7 +73,10 @@ export function readConfig(scope?: vscode.Uri): DevBotsConfig {
     gitBaseBranch: cfg.get<string>('git.baseBranch', '').trim(),
     worktreeRoot: cfg.get<string>('worktrees.root', '').trim(),
     supervisionModel: cfg.get<string>('supervision.model', 'opus').trim(),
-    supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 3)
+    supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 3),
+    mergeCheckCommands: cfg.get<string[]>('merge.checkCommands', []).map((c) => c.trim()).filter(Boolean),
+    reviewServeCommand: cfg.get<string>('review.serveCommand', 'npx ng serve --port {port}').trim(),
+    reviewBasePort: cfg.get<number>('review.basePort', 4201)
   };
 }
 

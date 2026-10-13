@@ -9,7 +9,8 @@ Spécification complète : [Proposition — Extension VS Code Dev Flow](https://
 
 ## État
 
-Phases 1 (fondations), 2 (planification) et 3 (dev et supervision) livrées.
+Phases 1 (fondations), 2 (planification), 3 (dev et supervision) et 4 (review
+et merge) livrées.
 Ce qui marche aujourd'hui :
 
 - paramètres par dépôt, secrets dans le SecretStorage ;
@@ -41,10 +42,17 @@ Ce qui marche aujourd'hui :
   correction plafonnée, jusqu'à « À valider » (voir
   [Dev et supervision](docs/dev-et-supervision.md)) ;
 - `.work/state.json`, barre d'état des agents, notifications, reprise après
-  un redémarrage.
+  un redémarrage ;
+- carte « À valider » : diff natif fichier par fichier, worktree dans une
+  nouvelle fenêtre ou l'espace de travail, application sur un port propre au
+  worktree, retours renvoyés à l'agent dans sa session ;
+- feu vert : merge séquentiel dans la branche de la feature, intégration de la
+  feature si elle a avancé, checks, conflit renvoyé à l'agent, suppression du
+  worktree et de la branche, fiche dans Done (voir
+  [Review et merge](docs/review-et-merge.md)).
 
-La phase suivante (review humaine, feu vert et merge) est décrite dans la
-proposition.
+La phase suivante (finitions : resynchronisation, paquet `.vsix`, doc
+d'équipe) est décrite dans la proposition.
 
 ## Démarrer
 
@@ -81,6 +89,9 @@ contient (ou contiendra) un dossier `.work`.
 | `devbots.worktrees.root` | Dossier des worktrees ; vide : `<dépôt>.worktrees` |
 | `devbots.supervision.model` | Modèle de la revue du CR et des étapes, `opus` par défaut |
 | `devbots.supervision.maxLoops` | Plafond de boucles de correction, sauf `maxLoops` de `supervision.json` |
+| `devbots.merge.checkCommands` | Commandes relancées au merge quand la feature a avancé ; vide : aucune |
+| `devbots.review.serveCommand` | Lance l'application d'un worktree en revue, `{port}` compris |
+| `devbots.review.basePort` | Premier port des worktrees en revue, 4201 par défaut |
 | `devbots.claude.executable` | Commande du CLI Claude Code |
 
 ### Accès aux sources
@@ -120,6 +131,11 @@ ni dans `.work`.
 | DevBots : trancher une dépendance | Attendre une dépendance infirmée par le plan, ou lever une dépendance confirmée |
 | DevBots : reclasser la fiche | Fiche née du tri : de New à Ready, ou l'inverse |
 | DevBots : personnaliser la supervision | Dépose `.work/supervision.json` prérempli et l'ouvre |
+| DevBots : voir le diff | Story à valider, bloquée ou mergée : ses changements dans la vue diff native |
+| DevBots : ouvrir le worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |
+| DevBots : lancer l'application | `devbots.review.serveCommand` dans un terminal, sur le port du worktree |
+| DevBots : renvoyer des retours à l'agent | Tes remarques repartent dans sa session ; la story repasse par la revue |
+| DevBots : feu vert (merge) | Merge dans la branche de la feature, nettoyage, fiche dans Done |
 
 ## Documentation
 
@@ -128,3 +144,4 @@ ni dans `.work`.
 - [Planification](docs/planification.md) — l'atelier, le gabarit et `.work/plans`
 - [Gabarits](docs/gabarits.md) — plan et CR, ceux du dépôt ou ceux par défaut
 - [Dev et supervision](docs/dev-et-supervision.md) — file d'attente, worktrees, agents, revue, tri
+- [Review et merge](docs/review-et-merge.md) — la carte « À valider », retours, feu vert, merge

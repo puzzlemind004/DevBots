@@ -7,6 +7,8 @@
  * Phase 2 : atelier de planification, de New à Ready ; gabarits du dépôt.
  * Phase 3 : state.json, worktrees, agents de dev, revue des CR, étapes de
  * supervision et tri des problèmes, de Ready à « À valider ».
+ * Phase 4 : ta revue (diff, worktree, application, retours), feu vert, merge
+ * séquentiel dans la branche de la feature, nettoyage, passage dans Done.
  */
 
 import { promises as fs } from 'node:fs';

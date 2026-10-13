@@ -181,6 +181,29 @@
           "markdownDescription": "Nombre maximal de boucles de correction (revue du CR ou supervision) avant que la story te revienne. `maxLoops` de `.work/supervision.json` est prioritaire.",
           "scope": "resource"
         },
+        "devbots.merge.checkCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Commandes relancées au merge, dans le worktree, quand la branche de la feature a avancé depuis la revue : par exemple `npx ng build` et `npx ng test --watch=false`. Une commande en échec renvoie la story à l'agent. Vide : aucune.",
+          "scope": "resource"
+        },
+        "devbots.review.serveCommand": {
+          "type": "string",
+          "default": "npx ng serve --port {port}",
+          "markdownDescription": "Lance l'application d'un worktree pour ta revue, dans un terminal. `{port}` reçoit un port propre au worktree. Vide : bouton désactivé.",
+          "scope": "resource"
+        },
+        "devbots.review.basePort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65000,
+          "default": 4201,
+          "markdownDescription": "Premier port attribué aux worktrees en revue (4201, 4202…), pour ne jamais disputer le 4200 au dépôt principal.",
+          "scope": "resource"
+        },
         "devbots.claude.executable": {
           "type": "string",
           "default": "claude",
@@ -288,6 +311,31 @@
         "icon": "$(book)"
       },
       {
+        "command": "devbots.approve",
+        "title": "DevBots : feu vert (merge)",
+        "icon": "$(check)"
+      },
+      {
+        "command": "devbots.sendFeedback",
+        "title": "DevBots : renvoyer des retours à l'agent",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devbots.showDiff",
+        "title": "DevBots : voir le diff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "devbots.openWorktree",
+        "title": "DevBots : ouvrir le worktree",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "devbots.serveApp",
+        "title": "DevBots : lancer l'application",
+        "icon": "$(run)"
+      },
+      {
         "command": "devbots.decideDependency",
         "title": "DevBots : trancher une dépendance"
       },
@@ -388,18 +436,63 @@
         },
         {
           "command": "devbots.showJournal",
-          "when": "view == devbots.flow && viewItem =~ /^story:(dev|review)/",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev/",
           "group": "inline@3"
         },
         {
-          "command": "devbots.openCr",
-          "when": "view == devbots.flow && viewItem =~ /^story:review/",
+          "command": "devbots.openReport",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devbots.approve",
+          "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
           "group": "inline@1"
         },
         {
-          "command": "devbots.openReport",
-          "when": "view == devbots.flow && viewItem =~ /^story:(review|dev:blocked)/",
+          "command": "devbots.sendFeedback",
+          "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
           "group": "inline@2"
+        },
+        {
+          "command": "devbots.showDiff",
+          "when": "view == devbots.flow && viewItem =~ /^story:(review|done:done)/",
+          "group": "inline@3"
+        },
+        {
+          "command": "devbots.openWorktree",
+          "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
+          "group": "inline@4"
+        },
+        {
+          "command": "devbots.showDiff",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "7_review@1"
+        },
+        {
+          "command": "devbots.openWorktree",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "7_review@2"
+        },
+        {
+          "command": "devbots.serveApp",
+          "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
+          "group": "7_review@3"
+        },
+        {
+          "command": "devbots.openCr",
+          "when": "view == devbots.flow && viewItem =~ /^story:(review|done:done)/",
+          "group": "7_review@4"
+        },
+        {
+          "command": "devbots.openReport",
+          "when": "view == devbots.flow && viewItem =~ /^story:(review|done:done)/",
+          "group": "7_review@5"
+        },
+        {
+          "command": "devbots.showJournal",
+          "when": "view == devbots.flow && viewItem =~ /^story:(review|done:done)/",
+          "group": "7_review@6"
         },
         {
           "command": "devbots.dequeue",

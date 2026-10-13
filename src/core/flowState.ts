@@ -83,6 +83,12 @@ export interface StoryRun {
   pendingCorrections?: string;
   /** Fiches créées par le tri des problèmes. */
   followUps: string[];
+  /** Port de l'application lancée pour ta revue, propre au worktree. */
+  servePort?: number;
+  /** Le merge, une fois fait : la story y occupe `mergeBase..mergeCommit`. */
+  mergedAt?: string;
+  mergeCommit?: string;
+  mergeBase?: string;
 }
 
 export interface FlowState {

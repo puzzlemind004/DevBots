@@ -1,6 +1,6 @@
 /**
- * Le dev et la supervision dans VS Code : commandes, journaux en direct, barre
- * d'état et notifications.
+ * Le dev, la supervision et ta revue dans VS Code : commandes, journaux en
+ * direct, diff, feu vert, barre d'état et notifications.
  *
  * Mince par construction : l'orchestrateur (`core/orchestrator.ts`) décide de
  * tout ; ce module relaie tes gestes et affiche ce qui se passe.
@@ -18,6 +18,7 @@ import { DEFAULT_SUPERVISION_FILE, SUPERVISION_FILE } from '../core/supervision.
 import { WorkDir, type StoryFile } from '../core/workDir.js';
 import { readConfig } from '../util/config.js';
 import type { FlowNode, StoryNode } from './flowTree.js';
+import { GIT_SCHEME, GitContentProvider, openStoryDiff } from './storyDiff.js';
 
 export interface DevContext {
   repoUri: vscode.Uri;
@@ -32,6 +33,8 @@ export class DevController implements vscode.Disposable {
   private orchestrator: Orchestrator;
   private workDir: WorkDir;
   private readonly journals = new Map<string, vscode.OutputChannel>();
+  /** Les terminaux où tourne l'application d'un worktree en revue. */
+  private readonly serveTerminals = new Map<string, vscode.Terminal>();
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -40,7 +43,16 @@ export class DevController implements vscode.Disposable {
     this.orchestrator = this.createOrchestrator();
     this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
     this.statusBar.command = 'devbots.flow.focus';
-    this.disposables.push(this.statusBar);
+    this.disposables.push(
+      this.statusBar,
+      vscode.window.onDidCloseTerminal((terminal) => {
+        for (const [id, t] of this.serveTerminals) {
+          if (t === terminal) {
+            this.serveTerminals.delete(id);
+          }
+        }
+      })
+    );
   }
 
   /** Au démarrage : bloque les stories orphelines d'une fenêtre fermée, puis relance la file. */
@@ -82,7 +94,13 @@ export class DevController implements vscode.Disposable {
       vscode.commands.registerCommand('devbots.openCr', (node?: FlowNode) => this.openRunFile(node, 'cr.md')),
       vscode.commands.registerCommand('devbots.decideDependency', (node?: FlowNode) => this.decideDependency(node)),
       vscode.commands.registerCommand('devbots.reclassify', (node?: FlowNode) => this.reclassify(node)),
-      vscode.commands.registerCommand('devbots.customizeSupervision', () => this.customizeSupervision())
+      vscode.commands.registerCommand('devbots.customizeSupervision', () => this.customizeSupervision()),
+      vscode.commands.registerCommand('devbots.approve', (node?: FlowNode) => this.approve(node)),
+      vscode.commands.registerCommand('devbots.sendFeedback', (node?: FlowNode) => this.sendFeedback(node)),
+      vscode.commands.registerCommand('devbots.showDiff', (node?: FlowNode) => this.showDiff(node)),
+      vscode.commands.registerCommand('devbots.openWorktree', (node?: FlowNode) => this.openWorktree(node)),
+      vscode.commands.registerCommand('devbots.serveApp', (node?: FlowNode) => this.serveApp(node)),
+      vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitContentProvider())
     ];
   }
 
@@ -269,6 +287,150 @@ export class DevController implements vscode.Disposable {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Ta revue                                                          */
+  /* ---------------------------------------------------------------- */
+
+  private async approve(node?: FlowNode): Promise<void> {
+    const run = await this.awaitingReview(node, 'Feu vert pour quelle story ?');
+    if (!run) {
+      return;
+    }
+    const confirmed = await vscode.window.showWarningMessage(
+      `Feu vert pour ${run.storyId} — ${run.title} ?`,
+      {
+        modal: true,
+        detail: [
+          `DevBots intègre ${run.baseBranch} si elle a avancé, puis merge ${run.branch} dans ${run.baseBranch}.`,
+          'Le worktree et la branche de la story sont ensuite supprimés, et la fiche passe dans Done.',
+          'Tes retouches non commitées du worktree partent avec la story.'
+        ].join('\n')
+      },
+      'Merger'
+    );
+    if (confirmed !== 'Merger') {
+      return;
+    }
+    // Rien ne doit tenir le worktree ouvert au moment de le supprimer.
+    this.releaseWorktree(run);
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Merge de ${run.storyId} dans ${run.baseBranch}…` },
+      () => this.guard(() => this.orchestrator.approve(run.storyId))
+    );
+  }
+
+  private async sendFeedback(node?: FlowNode): Promise<void> {
+    const run = await this.awaitingReview(node, 'Retours sur quelle story ?');
+    if (!run) {
+      return;
+    }
+    const feedback = await vscode.window.showInputBox({
+      title: `Retours pour ${run.storyId} — ${run.title}`,
+      prompt: "Tes remarques partent à l'agent, dans sa session. La story repasse en dev, puis par la revue du CR et la supervision.",
+      placeHolder: 'Par exemple : le message d’erreur doit citer le champ fautif.',
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim() ? undefined : 'Écris au moins une remarque.')
+    });
+    if (feedback) {
+      await this.guard(() => this.orchestrator.sendFeedback(run.storyId, feedback));
+    }
+  }
+
+  private async showDiff(node?: FlowNode): Promise<void> {
+    const run = await this.runFor(node, 'Diff de quelle story ?', (r) =>
+      ['awaiting_human', 'merging', 'blocked', 'done'].includes(r.status)
+    );
+    if (run) {
+      await this.guard(async () => {
+        await openStoryDiff(run, this.ctx.repoUri.fsPath);
+      });
+    }
+  }
+
+  private async openWorktree(node?: FlowNode): Promise<void> {
+    const run = await this.runFor(node, 'Worktree de quelle story ?', (r) => r.status !== 'done' && Boolean(r.worktree));
+    if (!run) {
+      return;
+    }
+    if (!run.worktree || !(await isDirectory(run.worktree))) {
+      vscode.window.showInformationMessage(`Le worktree de ${run.storyId} n'existe pas (encore).`);
+      return;
+    }
+    const uri = vscode.Uri.file(run.worktree);
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '$(empty-window) Dans une nouvelle fenêtre', value: 'window' as const },
+        {
+          label: "$(root-folder) Ajouté à l'espace de travail",
+          detail: "Une fenêtre à un seul dossier devient un espace de travail multi-racine : VS Code recharge les extensions.",
+          value: 'workspace' as const
+        }
+      ],
+      { title: `Ouvrir le worktree de ${run.storyId}` }
+    );
+    if (choice?.value === 'window') {
+      await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
+    } else if (choice?.value === 'workspace') {
+      if (this.workspaceFolderIndex(run.worktree) < 0) {
+        const count = vscode.workspace.workspaceFolders?.length ?? 0;
+        vscode.workspace.updateWorkspaceFolders(count, 0, { uri, name: `${run.storyId} · worktree` });
+      }
+    }
+  }
+
+  /** L'application du worktree, sur un port qui lui est propre, dans un terminal. */
+  private async serveApp(node?: FlowNode): Promise<void> {
+    const run = await this.awaitingReview(node, "Application de quelle story ?");
+    if (!run) {
+      return;
+    }
+    const config = readConfig(this.ctx.repoUri);
+    if (!config.reviewServeCommand) {
+      vscode.window.showInformationMessage('Aucune commande de lancement : renseigne devbots.review.serveCommand.');
+      return;
+    }
+    const port = await this.orchestrator.assignPort(run.storyId, config.reviewBasePort);
+    let terminal = this.serveTerminals.get(run.storyId);
+    if (!terminal) {
+      terminal = vscode.window.createTerminal({ name: `DevBots · ${run.storyId} :${port}`, cwd: run.worktree });
+      this.serveTerminals.set(run.storyId, terminal);
+      terminal.sendText(config.reviewServeCommand.split('{port}').join(String(port)));
+    }
+    terminal.show(true);
+    const chosen = await vscode.window.showInformationMessage(
+      `${run.storyId} se lance sur le port ${port}.`,
+      'Ouvrir dans le navigateur'
+    );
+    if (chosen) {
+      await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}`));
+    }
+  }
+
+  /** Une story « À valider », d'après le nœud cliqué ou un choix dans la liste. */
+  private async awaitingReview(node: FlowNode | undefined, title: string): Promise<StoryRun | undefined> {
+    const run = await this.runFor(node, title, (r) => r.status === 'awaiting_human');
+    if (run && run.status !== 'awaiting_human') {
+      vscode.window.showInformationMessage(`${run.storyId} n'attend pas ta revue (${statusLabel(run.status)}).`);
+      return undefined;
+    }
+    return run;
+  }
+
+  /** Ferme ce qui tient le worktree : le terminal de l'application, le dossier dans l'espace de travail. */
+  private releaseWorktree(run: StoryRun): void {
+    this.serveTerminals.get(run.storyId)?.dispose();
+    this.serveTerminals.delete(run.storyId);
+    const index = this.workspaceFolderIndex(run.worktree);
+    if (index >= 0) {
+      vscode.workspace.updateWorkspaceFolders(index, 1);
+    }
+  }
+
+  private workspaceFolderIndex(dir: string): number {
+    const target = path.resolve(dir).toLowerCase();
+    return (vscode.workspace.workspaceFolders ?? []).findIndex((f) => path.resolve(f.uri.fsPath).toLowerCase() === target);
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Affichage                                                         */
   /* ---------------------------------------------------------------- */
 
@@ -286,6 +448,23 @@ export class DevController implements vscode.Disposable {
             void this.openRunFile(node, 'cr.md');
           }
         });
+    } else if (event.kind === 'merged') {
+      const message = `${event.storyId} — ${event.title} mergée dans ${event.into}.`;
+      if (event.warning) {
+        void vscode.window.showWarningMessage(`${message} ${event.warning}`);
+      } else {
+        void vscode.window.showInformationMessage(message);
+      }
+    } else if (event.kind === 'returned' || event.kind === 'mergeFailed') {
+      const message =
+        event.kind === 'returned'
+          ? `${event.storyId} renvoyée à l'agent : ${event.reason}.`
+          : `${event.storyId} reste à valider. ${event.reason}`;
+      void vscode.window.showWarningMessage(message, 'Voir le journal').then((chosen) => {
+        if (chosen) {
+          void this.showJournal(this.fakeNode(event.storyId));
+        }
+      });
     } else if (event.kind === 'blocked') {
       void vscode.window
         .showWarningMessage(`${event.storyId} bloquée : ${event.reason}`, 'Voir le journal', 'Relancer')
@@ -305,7 +484,7 @@ export class DevController implements vscode.Disposable {
     const runs = Object.values(state?.stories ?? {});
     const active = this.orchestrator.activeIds.length;
     const queued = runs.filter((r) => r.status === 'queued').length;
-    const waiting = runs.filter((r) => r.status === 'awaiting_human').length;
+    const waiting = runs.filter((r) => r.status === 'awaiting_human' || r.status === 'merging').length;
     if (active + queued + waiting === 0) {
       this.statusBar.hide();
       return;
@@ -369,7 +548,8 @@ export class DevController implements vscode.Disposable {
           installCommand: c.devInstallCommand,
           rulesFile: c.devRulesFile,
           reviewModel: c.supervisionModel,
-          maxLoops: c.supervisionMaxLoops
+          maxLoops: c.supervisionMaxLoops,
+          mergeChecks: c.mergeCheckCommands
         };
       },
       onJournal: (storyId, line) => {
@@ -453,5 +633,13 @@ export class DevController implements vscode.Disposable {
       group: 'dev',
       story: { filePath: '', folder: 'ready', title: storyId, frontmatter: { source_id: storyId } }
     };
+  }
+}
+
+async function isDirectory(p: string): Promise<boolean> {
+  try {
+    return (await fs.stat(p)).isDirectory();
+  } catch {
+    return false;
   }
 }

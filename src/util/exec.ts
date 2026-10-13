@@ -25,6 +25,8 @@ export interface ExecOptions {
    * le shell interprète les arguments.
    */
   shell?: boolean;
+  /** Garde la sortie standard telle quelle, sans retirer les blancs de début et de fin. */
+  raw?: boolean;
 }
 
 export interface ExecResult {
@@ -166,7 +168,7 @@ function run(
     });
 
     child.on('close', (code) => {
-      const result: ExecResult = { stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? -1 };
+      const result: ExecResult = { stdout: options.raw ? stdout : stdout.trim(), stderr: stderr.trim(), code: code ?? -1 };
       finish(() =>
         code === 0
           ? resolve(result)
