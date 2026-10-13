@@ -27,6 +27,10 @@ export interface DevBotsConfig {
   githubTrustedLabel: string;
   maxParallelAgents: number;
   claudeExecutable: string;
+  planningSkill: string;
+  planningTemplate: string;
+  planningModel: string;
+  planningMaxResumes: number;
 }
 
 export function readConfig(scope?: vscode.Uri): DevBotsConfig {
@@ -41,7 +45,11 @@ export function readConfig(scope?: vscode.Uri): DevBotsConfig {
     githubTrustedAuthorsOnly: cfg.get<boolean>('import.githubTrustedAuthorsOnly', true),
     githubTrustedLabel: cfg.get<string>('import.githubTrustedLabel', 'devbots').trim(),
     maxParallelAgents: cfg.get<number>('agents.maxParallel', 2),
-    claudeExecutable: cfg.get<string>('claude.executable', 'claude').trim() || 'claude'
+    claudeExecutable: cfg.get<string>('claude.executable', 'claude').trim() || 'claude',
+    planningSkill: cfg.get<string>('planning.skill', '').trim().replace(/^\//, ''),
+    planningTemplate: cfg.get<string>('planning.template', '').trim(),
+    planningModel: cfg.get<string>('planning.model', 'opus').trim(),
+    planningMaxResumes: cfg.get<number>('planning.maxResumes', 20)
   };
 }
 

@@ -9,7 +9,7 @@ Spécification complète : [Proposition — Extension VS Code Dev Flow](https://
 
 ## État
 
-Phase 1 (fondations) en cours. Ce qui marche aujourd'hui :
+Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
 
 - paramètres par dépôt, secrets dans le SecretStorage ;
 - connecteur GitHub : une issue parente et ses sub-issues deviennent des fiches ;
@@ -17,10 +17,13 @@ Phase 1 (fondations) en cours. Ce qui marche aujourd'hui :
 - connecteur Azure DevOps : un epic ou une feature et ses user stories ;
 - import vers `.work/new`, avec marquage « à revoir » au lieu d'un écrasement ;
 - panneau latéral en lecture (New, Ready, Done) ;
-- vérification du CLI Claude Code au démarrage.
+- vérification du CLI Claude Code au démarrage ;
+- atelier de planification : compréhension et questions, plan structuré revu
+  section par section, versions et diff, validation qui place la fiche dans
+  `ready/` (voir [Planification](docs/planification.md)).
 
-Les phases suivantes (planification, agents de dev, review et merge) sont
-décrites dans la proposition.
+Les phases suivantes (agents de dev, review et merge) sont décrites dans la
+proposition.
 
 ## Démarrer
 
@@ -43,6 +46,10 @@ contient (ou contiendra) un dossier `.work`.
 | `devbots.azureDevOps.project` | Nom du projet |
 | `devbots.workDir` | Dossier du flux, `.work` par défaut |
 | `devbots.import.githubTrustedAuthorsOnly` | N'importe que tes issues et celles portant le label de confiance |
+| `devbots.planning.skill` | Skill de planification du dépôt (par exemple `plan-story`) ; vide : consigne générique |
+| `devbots.planning.template` | Gabarit de plan de story, relatif au dépôt ; vide : gabarit par défaut |
+| `devbots.planning.model` | Modèle de l'atelier, `opus` par défaut |
+| `devbots.planning.maxResumes` | Plafond de reprises d'une session de planification |
 | `devbots.agents.maxParallel` | Plafond d'agents de dev simultanés (phase 3) |
 | `devbots.claude.executable` | Commande du CLI Claude Code |
 
@@ -64,6 +71,7 @@ ni dans `.work`.
 | Commande | Effet |
 | --- | --- |
 | DevBots : importer des tickets | GitHub : liste à cocher des issues ouvertes (le crayon garde la saisie d'un numéro). Azure DevOps : demande un ID. Remplit `.work/new` |
+| DevBots : planifier la story | Ouvre l'atelier d'une story de New (aussi : l'ampoule sur la story) |
 | DevBots : rafraîchir le flux | Relit `.work` |
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
 | DevBots : effacer le jeton d'accès | Le retire |
@@ -73,3 +81,4 @@ ni dans `.work`.
 
 - [Architecture](docs/architecture.md) — les modules et leurs frontières
 - [Format des fiches](docs/format-fiches.md) — frontmatter et resynchronisation
+- [Planification](docs/planification.md) — l'atelier, le gabarit et `.work/plans`

@@ -3,13 +3,15 @@
  *
  * Phase 1 : paramètres, connecteurs de tickets, import vers `.work/new`,
  * panneau latéral en lecture, vérification du CLI Claude Code.
+ * Phase 2 : atelier de planification, de New à Ready.
  */
 
 import * as vscode from 'vscode';
-import { WorkDir } from './core/workDir.js';
+import { WorkDir, type StoryFile } from './core/workDir.js';
 import { checkClaude } from './core/claudeCli.js';
 import { FlowTreeProvider, type FlowNode } from './ui/flowTree.js';
 import { runImport } from './ui/importCommand.js';
+import { PlanningPanel } from './ui/planningPanel.js';
 import {
   CONFIG_SECTION,
   deleteSecret,
@@ -40,9 +42,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(view);
 
-  // Le panneau se rafraîchit seul quand une fiche de `.work` change.
+  // Le panneau se rafraîchit seul quand une fiche ou un atelier de `.work` change.
   const watcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(folder, `${config.workDir}/**/*.md`)
+    new vscode.RelativePattern(folder, `${config.workDir}/**/*.{md,json}`)
   );
   watcher.onDidCreate(() => tree.refresh(), undefined, context.subscriptions);
   watcher.onDidDelete(() => tree.refresh(), undefined, context.subscriptions);
@@ -70,6 +72,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       })
     ),
     vscode.commands.registerCommand('devbots.refresh', () => tree.refresh()),
+    vscode.commands.registerCommand('devbots.planStory', async (node?: FlowNode) => {
+      const story = node?.kind === 'story' ? node.story : await pickNewStory(folder.uri);
+      if (!story) {
+        return;
+      }
+      try {
+        await PlanningPanel.show(story, {
+          extensionUri: context.extensionUri,
+          repoUri: folder.uri,
+          log,
+          onChanged: () => tree.refresh()
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error(`Ouverture de l'atelier : ${message}`);
+        vscode.window.showErrorMessage(`Impossible d'ouvrir l'atelier : ${message}`);
+      }
+    }),
     vscode.commands.registerCommand('devbots.openStory', async (filePath: string) => {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
       await vscode.window.showTextDocument(doc, { preview: true });
@@ -137,6 +157,27 @@ async function clearToken(context: vscode.ExtensionContext, scope: vscode.Uri): 
   }
   await deleteSecret(context.secrets, kind);
   vscode.window.showInformationMessage(`Jeton ${sourceLabel(kind)} effacé.`);
+}
+
+interface StoryPick extends vscode.QuickPickItem {
+  story: StoryFile;
+}
+
+async function pickNewStory(scope: vscode.Uri): Promise<StoryFile | undefined> {
+  const workDir = new WorkDir(vscode.Uri.joinPath(scope, readConfig(scope).workDir).fsPath);
+  const stories = await workDir.listStories('new');
+  if (stories.length === 0) {
+    vscode.window.showInformationMessage("Aucune story dans New. Importe des tickets d'abord.");
+    return undefined;
+  }
+  const picked = await vscode.window.showQuickPick<StoryPick>(
+    stories.map((story) => ({
+      label: `${story.frontmatter.source_id} — ${story.title}`,
+      story
+    })),
+    { title: 'Quelle story planifier ?', matchOnDescription: true }
+  );
+  return picked?.story;
 }
 
 /** `kind` est réservé par QuickPickItem : la source voyage dans `source`. */

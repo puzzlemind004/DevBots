@@ -16,17 +16,24 @@ src/
 │   ├── repoSlug.ts     Lecture des identifiants de dépôt GitHub
 │   ├── storyCard.ts    Fabrication des fiches markdown
 │   ├── workDir.ts      Lecture et écriture de .work
-│   └── claudeCli.ts    Vérification du CLI Claude Code
+│   ├── claudeCli.ts    Vérification du CLI et appels claude -p
+│   ├── plan.ts         Schémas du plan, lecture défensive, contrôles de forme
+│   ├── planRender.ts   Plan → markdown, fiche de ready/ depuis le gabarit
+│   ├── planStore.ts    .work/plans/<id>/ : état, versions, historique
+│   └── planning.ts     L'atelier de planification, sans interface
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
 │   ├── azureDevOps.ts  Epic / feature → user stories
 │   └── factory.ts      Choix de la source et résolution de l'accès
 ├── ui/                 Ce qui touche à l'interface VS Code
 │   ├── flowTree.ts     Le panneau latéral
-│   └── importCommand.ts La commande d'import
+│   ├── importCommand.ts La commande d'import
+│   └── planningPanel.ts L'onglet de l'atelier (webview)
 └── util/
     ├── config.ts       Paramètres et SecretStorage
-    └── exec.ts         Lancement de processus (git, claude)
+    ├── exec.ts         Lancement de processus (git, claude)
+    └── resolveCommand.ts Trouver l'exécutable sous Windows, sans shell
+resources/planning/     Script et styles de la page de l'atelier
 ```
 
 `core/` ne connaît pas `vscode` : c'est là que vit la logique testable, et les
@@ -78,6 +85,28 @@ dépôt public. Deux parades :
 passent tels quels, sans interprétation, ce qui ferme la porte à toute injection
 par un titre de ticket ou un nom de branche.
 
+Sous Windows, une installation npm de Claude Code n'expose qu'un `claude.cmd`,
+que Node refuse de lancer sans shell. `util/resolveCommand.ts` lit ce lanceur
+pour y trouver le `claude.exe` qu'il appelle, et c'est lui qui est lancé : pas
+de détour par `cmd.exe`, qui réinterpréterait les arguments.
+
+## Appels à Claude
+
+`core/claudeCli.ts` construit les appels `claude -p` : sortie
+`--output-format json` avec un `--json-schema` imposé, `--resume` pour reprendre
+une session, `--tools` pour borner les outils. Le prompt passe par l'entrée
+standard, ce qui évite la limite de longueur de ligne de commande de Windows.
+`--bare` n'est jamais utilisé : il contourne la connexion par abonnement.
+
+L'atelier reçoit ce lanceur en paramètre (`ClaudeRunner`) : les tests le
+remplacent par un faux qui rejoue des réponses, sans CLI.
+
+## Atelier de planification
+
+`core/planning.ts` tient l'atelier sans rien savoir de VS Code ;
+`ui/planningPanel.ts` ne fait que relayer les gestes de la page et lui renvoyer
+l'état. Le détail est dans [Planification](planification.md).
+
 ## Ce qui viendra
 
 - `state.json` (phase 3) remplacera le fichier de suivi markdown et tiendra les
@@ -85,6 +114,8 @@ par un titre de ticket ou un nom de branche.
   `pre_pr_check`, `awaiting_human`, `merging`, `done`, `blocked`.
 - Le graphe de dépendances se construira depuis les plans validés, un lien
   déclaré n'étant retenu que si les deux plans touchent des fichiers ou des
-  contrats communs.
+  contrats communs. Les fiches de `ready/` portent déjà ce qu'il faut :
+  `files`, `dependencies_confirmed`, `dependencies_refuted` et le chemin du
+  plan JSON.
 - Les worktrees, la file d'attente et le merge séquentiel viendront avec les
   phases 3 et 4.

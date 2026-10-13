@@ -2,7 +2,8 @@
  * Lecture et écriture du dossier `.work`.
  *
  * Le format existant ne change pas : `new/`, `ready/`, `done/` contiennent une
- * fiche markdown par story, et `state.json` (phase 3) tiendra l'état du flux.
+ * fiche markdown par story, `plans/` garde les ateliers de planification, et
+ * `state.json` (phase 3) tiendra l'état du flux.
  */
 
 import { promises as fs } from 'node:fs';
@@ -47,6 +48,11 @@ export class WorkDir {
   /** Chemin absolu d'un des dossiers du flux. */
   folderPath(folder: StoryFolder): string {
     return path.join(this.root, folder);
+  }
+
+  /** Dossier des planifications : `.work/plans/<id>/`. */
+  plansPath(): string {
+    return path.join(this.root, 'plans');
   }
 
   async ensureFolders(): Promise<void> {

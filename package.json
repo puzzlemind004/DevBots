@@ -77,6 +77,32 @@
           "markdownDescription": "Label qui marque une issue comme validée pour l'import, en plus de tes propres issues.",
           "scope": "resource"
         },
+        "devbots.planning.skill": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Skill de planification du dépôt, sans la barre oblique (par exemple `plan-story`). Il ouvre chaque atelier. Vide : consigne générique de DevBots.",
+          "scope": "resource"
+        },
+        "devbots.planning.template": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Gabarit de plan de story, relatif à la racine du dépôt (par exemple `.work/templates/plan-story.md`). Marqueurs : `{{title}}`, `{{source_id}}`, `{{story}}`, `{{comprehension}}`, `{{couverture}}`, `{{etapes}}`, `{{tests}}`, `{{dependances}}`, `{{execution}}`, `{{plan}}`, `{{modele}}`, `{{complexite}}`. Vide : gabarit par défaut.",
+          "scope": "resource"
+        },
+        "devbots.planning.model": {
+          "type": "string",
+          "default": "opus",
+          "markdownDescription": "Modèle de l'atelier de planification (`opus`, `sonnet`, ou un nom complet). Vide : modèle par défaut de Claude Code.",
+          "scope": "resource"
+        },
+        "devbots.planning.maxResumes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20,
+          "markdownDescription": "Nombre maximal de reprises d'une session de planification (réponses, commentaires). Au-delà, l'atelier demande de recommencer.",
+          "scope": "resource"
+        },
         "devbots.agents.maxParallel": {
           "type": "integer",
           "minimum": 1,
@@ -133,6 +159,11 @@
         "title": "DevBots : ouvrir la fiche"
       },
       {
+        "command": "devbots.planStory",
+        "title": "DevBots : planifier la story",
+        "icon": "$(lightbulb-sparkle)"
+      },
+      {
         "command": "devbots.openInSource",
         "title": "DevBots : ouvrir dans la source",
         "icon": "$(link-external)"
@@ -165,9 +196,14 @@
       ],
       "view/item/context": [
         {
+          "command": "devbots.planStory",
+          "when": "view == devbots.flow && viewItem =~ /story:new/",
+          "group": "inline@1"
+        },
+        {
           "command": "devbots.openInSource",
           "when": "view == devbots.flow && viewItem =~ /story/",
-          "group": "inline"
+          "group": "inline@2"
         }
       ],
       "commandPalette": [

@@ -1,13 +1,15 @@
 /**
  * Le panneau latéral : le tableau de bord du flux.
  *
- * En phase 1, seuls les groupes lus sur disque existent (New, Ready, Done).
+ * Seuls les groupes lus sur disque existent pour l'instant (New, Ready, Done) ;
+ * une story de New en cours de planification le signale.
  * Les groupes « En dev » et « À valider » viendront avec `state.json` en phase 3.
  */
 
 import * as vscode from 'vscode';
 import type { StoryFile, StoryFolder } from '../core/workDir.js';
 import type { WorkDir } from '../core/workDir.js';
+import { PlanStore, type PlanningPhase } from '../core/planStore.js';
 
 const GROUPS: ReadonlyArray<{ folder: StoryFolder; label: string }> = [
   { folder: 'new', label: 'New' },
@@ -28,6 +30,8 @@ export interface GroupNode {
 export interface StoryNode {
   kind: 'story';
   story: StoryFile;
+  /** Phase de l'atelier, pour une story de New en cours de planification. */
+  planning?: PlanningPhase;
 }
 
 export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
@@ -57,7 +61,15 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
     }
     if (element.kind === 'group') {
       const stories = await this.workDir.listStories(element.folder);
-      return stories.map((story) => ({ kind: 'story', story }));
+      const phases =
+        element.folder === 'new'
+          ? await new PlanStore(this.workDir.plansPath()).listPhases()
+          : new Map<string, PlanningPhase>();
+      return stories.map((story) => ({
+        kind: 'story',
+        story,
+        planning: phases.get(story.frontmatter.source_id)
+      }));
     }
     return [];
   }
@@ -116,6 +128,12 @@ function storyItem(node: StoryNode): vscode.TreeItem {
     );
     item.tooltip = new vscode.MarkdownString(
       `**${story.title}**\n\nLa story a changé dans la source depuis son import. Révision vue : \`${story.frontmatter.source_rev_seen ?? '?'}\`.`
+    );
+  } else if (node.planning) {
+    item.description = node.planning === 'understanding' ? 'en compréhension' : 'plan en revue';
+    item.iconPath = new vscode.ThemeIcon('lightbulb-sparkle');
+    item.tooltip = new vscode.MarkdownString(
+      `**${story.title}**\n\nPlanification en cours : l'atelier reprend où il s'était arrêté.`
     );
   } else {
     item.iconPath = new vscode.ThemeIcon('file');
