@@ -13,6 +13,7 @@ Phase 1 (fondations) en cours. Ce qui marche aujourd'hui :
 
 - paramètres par dépôt, secrets dans le SecretStorage ;
 - connecteur GitHub : une issue parente et ses sub-issues deviennent des fiches ;
+- côté GitHub, choix des issues dans la liste des issues ouvertes du dépôt ;
 - connecteur Azure DevOps : un epic ou une feature et ses user stories ;
 - import vers `.work/new`, avec marquage « à revoir » au lieu d'un écrasement ;
 - panneau latéral en lecture (New, Ready, Done) ;
@@ -62,7 +63,7 @@ ni dans `.work`.
 
 | Commande | Effet |
 | --- | --- |
-| DevBots : importer des tickets | Demande un ID et remplit `.work/new` |
+| DevBots : importer des tickets | GitHub : liste à cocher des issues ouvertes (le crayon garde la saisie d'un numéro). Azure DevOps : demande un ID. Remplit `.work/new` |
 | DevBots : rafraîchir le flux | Relit `.work` |
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
 | DevBots : effacer le jeton d'accès | Le retire |

@@ -36,13 +36,16 @@ tests unitaires n'ont donc besoin d'aucun hôte VS Code. Les modules qui importe
 ## L'interface « source de tickets »
 
 `TicketSource` expose deux opérations : `probe()` pour vérifier l'accès, et
-`fetchTree(rootId)` pour récupérer un ticket et sa descendance. Les deux
+`fetchTree(rootId)` pour récupérer un ticket et sa descendance. Une troisième,
+`listCandidates()`, est optionnelle : la source GitHub l'implémente pour
+proposer les issues ouvertes du dépôt en liste à cocher. Azure DevOps ne
+l'implémente pas, et l'import y demande un identifiant. Les deux
 implémentations produisent exactement les mêmes objets `Ticket`, si bien que le
 reste de l'extension ignore d'où viennent les stories.
 
 | | Azure DevOps | GitHub |
 | --- | --- | --- |
-| Point d'entrée | ID d'epic ou de feature | Numéro d'une issue parente |
+| Point d'entrée | ID d'epic ou de feature | Issues cochées dans la liste des issues ouvertes, ou un numéro |
 | Hiérarchie | Epic → feature → user story | Issue parente → sub-issues, sur plusieurs niveaux |
 | Dépendances | Liens prédécesseur / successeur | `Blocked by #12` dans le corps |
 | Critères d'acceptation | Champ dédié | Section `## Critères d'acceptation`, sinon vide |
@@ -64,7 +67,8 @@ La description d'une issue est du texte que n'importe qui peut écrire sur un
 dépôt public. Deux parades :
 
 1. `devbots.import.githubTrustedAuthorsOnly` n'importe que tes propres issues et
-   celles portant le label de confiance ;
+   celles portant le label de confiance ; la liste des issues ouvertes applique
+   le même filtre et indique combien d'issues il masque ;
 2. aux phases suivantes, ce contenu sera présenté aux agents comme une donnée à
    analyser, leurs commandes restant bornées à une liste autorisée.
 

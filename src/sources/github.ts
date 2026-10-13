@@ -2,13 +2,16 @@
  * Source de tickets GitHub : une issue parente et ses sub-issues, sur plusieurs niveaux.
  *
  * Lecture seule. L'API utilisée se limite aux issues et à leurs sub-issues.
+ * La liste des issues ouvertes sert au choix des racines d'import.
  */
 
 import { Octokit } from 'octokit';
 import type {
   CancellationLike,
+  CandidateListing,
   DeclaredDependency,
   Ticket,
+  TicketCandidate,
   TicketLevel,
   TicketSource
 } from '../core/model.js';
@@ -16,6 +19,9 @@ import { extractAcceptanceCriteria } from '../core/acceptance.js';
 
 /** Profondeur maximale explorée, garde-fou contre une hiérarchie cyclique ou absurde. */
 const MAX_DEPTH = 4;
+
+/** Plafond de la liste des issues ouvertes : au-delà, la saisie d'un numéro reste possible. */
+export const MAX_LISTED_ISSUES = 1000;
 
 export interface GitHubSourceOptions {
   owner: string;
@@ -28,7 +34,7 @@ export interface GitHubSourceOptions {
 }
 
 /** Une issue telle que l'API la renvoie, réduite aux champs utilisés. */
-interface GitHubIssue {
+export interface GitHubIssue {
   number: number;
   title: string;
   body: string | null;
@@ -37,6 +43,19 @@ interface GitHubIssue {
   html_url: string;
   user: { login: string } | null;
   labels: Array<string | { name?: string }>;
+}
+
+/** Une issue de la liste du dépôt. L'API y mêle les pull requests. */
+export interface GitHubListedIssue extends GitHubIssue {
+  pull_request?: unknown;
+  sub_issues_summary?: { total: number } | null;
+}
+
+/** Ce qui décide qu'une issue est importable sur un dépôt public. */
+export interface TrustFilter {
+  trustedAuthorsOnly: boolean;
+  trustedAuthorLogin?: string;
+  trustedLabel?: string;
 }
 
 export class GitHubTicketSource implements TicketSource {
@@ -52,6 +71,33 @@ export class GitHubTicketSource implements TicketSource {
       owner: this.options.owner,
       repo: this.options.repo
     });
+  }
+
+  async listCandidates(cancellation?: CancellationLike): Promise<CandidateListing> {
+    let read = 0;
+    const issues = (await this.octokit.paginate(
+      this.octokit.rest.issues.listForRepo,
+      {
+        owner: this.options.owner,
+        repo: this.options.repo,
+        state: 'open',
+        sort: 'updated',
+        direction: 'desc',
+        per_page: 100
+      },
+      (response, done) => {
+        read += response.data.length;
+        if (cancellation?.isCancellationRequested || read >= MAX_LISTED_ISSUES) {
+          done();
+        }
+        return response.data;
+      }
+    )) as unknown as GitHubListedIssue[];
+
+    // La dernière page lue peut dépasser le plafond : la liste est alors coupée.
+    const truncated = issues.length >= MAX_LISTED_ISSUES;
+    issues.length = Math.min(issues.length, MAX_LISTED_ISSUES);
+    return { ...selectCandidates(issues, this.options), truncated };
   }
 
   async fetchTree(rootId: string, cancellation?: CancellationLike): Promise<Ticket[]> {
@@ -84,7 +130,7 @@ export class GitHubTicketSource implements TicketSource {
     seen.add(issueNumber);
 
     const issue = await this.getIssue(issueNumber);
-    if (!issue || !this.isTrusted(issue)) {
+    if (!issue || !isTrustedIssue(issue, this.options)) {
       return;
     }
 
@@ -137,28 +183,6 @@ export class GitHubTicketSource implements TicketSource {
     }
   }
 
-  /**
-   * Sur un dépôt public, n'importe qui peut ouvrir une issue : son corps est du
-   * texte non fiable. Le filtre ne retient que tes issues et celles que tu as
-   * marquées du label de confiance.
-   */
-  private isTrusted(issue: GitHubIssue): boolean {
-    if (!this.options.trustedAuthorsOnly) {
-      return true;
-    }
-    if (
-      this.options.trustedAuthorLogin &&
-      issue.user?.login?.toLowerCase() === this.options.trustedAuthorLogin.toLowerCase()
-    ) {
-      return true;
-    }
-    const label = this.options.trustedLabel?.toLowerCase();
-    if (!label) {
-      return false;
-    }
-    return labelNames(issue).some((name) => name.toLowerCase() === label);
-  }
-
   private toTicket(issue: GitHubIssue, parentId: string | undefined, level: TicketLevel): Ticket {
     const body = issue.body ?? '';
     const { description, acceptanceCriteria } = extractAcceptanceCriteria(body);
@@ -184,6 +208,61 @@ export class GitHubTicketSource implements TicketSource {
     }
     return ticket;
   }
+}
+
+/**
+ * Sur un dépôt public, n'importe qui peut ouvrir une issue : son corps est du
+ * texte non fiable. Le filtre ne retient que tes issues et celles que tu as
+ * marquées du label de confiance.
+ */
+export function isTrustedIssue(issue: GitHubIssue, filter: TrustFilter): boolean {
+  if (!filter.trustedAuthorsOnly) {
+    return true;
+  }
+  if (
+    filter.trustedAuthorLogin &&
+    issue.user?.login?.toLowerCase() === filter.trustedAuthorLogin.toLowerCase()
+  ) {
+    return true;
+  }
+  const label = filter.trustedLabel?.toLowerCase();
+  if (!label) {
+    return false;
+  }
+  return labelNames(issue).some((name) => name.toLowerCase() === label);
+}
+
+/** Retire les pull requests de la liste, puis applique le filtre de confiance. */
+export function selectCandidates(
+  issues: GitHubListedIssue[],
+  filter: TrustFilter
+): Omit<CandidateListing, 'truncated'> {
+  const candidates: TicketCandidate[] = [];
+  let hiddenCount = 0;
+  for (const issue of issues) {
+    if (issue.pull_request) {
+      continue;
+    }
+    if (!isTrustedIssue(issue, filter)) {
+      hiddenCount++;
+      continue;
+    }
+    const candidate: TicketCandidate = {
+      sourceId: String(issue.number),
+      title: issue.title,
+      labels: labelNames(issue),
+      updatedAt: issue.updated_at,
+      webUrl: issue.html_url
+    };
+    if (issue.user?.login) {
+      candidate.authorLogin = issue.user.login;
+    }
+    if (issue.sub_issues_summary) {
+      candidate.childCount = issue.sub_issues_summary.total;
+    }
+    candidates.push(candidate);
+  }
+  return { candidates, hiddenCount };
 }
 
 function labelNames(issue: GitHubIssue): string[] {

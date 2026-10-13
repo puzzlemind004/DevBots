@@ -114,7 +114,7 @@
     "viewsWelcome": [
       {
         "view": "devbots.flow",
-        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\nLes stories importées arrivent dans `.work/new`."
+        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\nSur GitHub, tu choisis dans la liste des issues ouvertes du dépôt. Les stories importées arrivent dans `.work/new`."
       }
     ],
     "commands": [

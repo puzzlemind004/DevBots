@@ -86,6 +86,33 @@ export interface TicketSource {
   fetchTree(rootId: string, token?: CancellationLike): Promise<Ticket[]>;
   /** Vérifie la connexion et les droits en lecture. */
   probe(): Promise<void>;
+  /**
+   * Liste les tickets ouverts qui peuvent servir de racine d'import.
+   *
+   * Optionnel : seule la source GitHub l'implémente. Sans elle, l'import
+   * demande un identifiant.
+   */
+  listCandidates?(token?: CancellationLike): Promise<CandidateListing>;
+}
+
+/** Un ticket proposé à l'import, sans son contenu. */
+export interface TicketCandidate {
+  sourceId: string;
+  title: string;
+  labels: string[];
+  authorLogin?: string;
+  /** Nombre de sub-issues, quand la source le fournit. */
+  childCount?: number;
+  updatedAt: string;
+  webUrl: string;
+}
+
+export interface CandidateListing {
+  candidates: TicketCandidate[];
+  /** Tickets écartés par le filtre d'auteur, pour le signaler à l'écran. */
+  hiddenCount: number;
+  /** Vrai quand la liste a été coupée au plafond de lecture. */
+  truncated: boolean;
 }
 
 /** Le minimum attendu d'un `vscode.CancellationToken`, sans dépendre de `vscode`. */
