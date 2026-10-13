@@ -89,8 +89,9 @@ replanifiée.
 
 ## Gabarit
 
-`devbots.planning.template` désigne ton gabarit de plan de story, relatif à la
-racine du dépôt. Vide, un gabarit par défaut est utilisé. Marqueurs reconnus :
+Le gabarit du plan se choisit comme les autres (voir [Gabarits](gabarits.md)) :
+`devbots.planning.template` s'il est renseigné, sinon `templates/plan.md` du
+dossier du flux, sinon le gabarit par défaut. Marqueurs reconnus :
 
 | Marqueur | Contenu |
 | --- | --- |

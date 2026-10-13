@@ -86,7 +86,7 @@
         "devbots.planning.template": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Gabarit de plan de story, relatif à la racine du dépôt (par exemple `.work/templates/plan-story.md`). Marqueurs : `{{title}}`, `{{source_id}}`, `{{story}}`, `{{comprehension}}`, `{{couverture}}`, `{{etapes}}`, `{{tests}}`, `{{dependances}}`, `{{execution}}`, `{{plan}}`, `{{modele}}`, `{{complexite}}`. Vide : gabarit par défaut.",
+          "markdownDescription": "Gabarit de plan de story, relatif à la racine du dépôt. Vide : `templates/plan.md` du dossier du flux s'il existe, sinon le gabarit par défaut. La commande « personnaliser les gabarits » dépose ce fichier. Marqueurs : `{{title}}`, `{{source_id}}`, `{{story}}`, `{{comprehension}}`, `{{couverture}}`, `{{etapes}}`, `{{tests}}`, `{{dependances}}`, `{{execution}}`, `{{plan}}`, `{{modele}}`, `{{complexite}}`.",
           "scope": "resource"
         },
         "devbots.planning.model": {
@@ -194,6 +194,10 @@
       {
         "command": "devbots.checkClaude",
         "title": "DevBots : vérifier l'installation de Claude Code"
+      },
+      {
+        "command": "devbots.customizeTemplates",
+        "title": "DevBots : personnaliser les gabarits"
       }
     ],
     "menus": {

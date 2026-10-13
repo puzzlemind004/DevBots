@@ -21,6 +21,7 @@ src/
 │   ├── plan.ts         Schémas du plan, lecture défensive, contrôles de forme
 │   ├── planRender.ts   Plan → markdown, fiche de ready/ depuis le gabarit
 │   ├── planStore.ts    .work/plans/<id>/ : état, versions, historique
+│   ├── templates.ts    Gabarits du plan et du CR : ceux du dépôt, sinon par défaut
 │   └── planning.ts     L'atelier de planification, sans interface
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
@@ -30,6 +31,7 @@ src/
 │   ├── flowTree.ts     Le panneau latéral
 │   ├── importCommand.ts La commande d'import
 │   ├── localCardCommands.ts Nouvelle story, nouvelle feature
+│   ├── templatesCommand.ts Personnaliser les gabarits
 │   └── planningPanel.ts L'onglet de l'atelier (webview)
 └── util/
     ├── config.ts       Paramètres et SecretStorage
@@ -142,3 +144,7 @@ l'état. Le détail est dans [Planification](planification.md).
   plan JSON.
 - Les worktrees, la file d'attente et le merge séquentiel viendront avec les
   phases 3 et 4.
+- Après la revue du CR, la supervision enchaînera les étapes déclarées par le
+  dépôt dans `.work/supervision.json` (skills ou agents, `pre-pr-check` par
+  défaut), toutes tenues au même schéma de sortie. Le CR suivra le gabarit
+  du dépôt (voir [Gabarits](gabarits.md)).

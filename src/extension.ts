@@ -4,7 +4,7 @@
  * Phase 1 : paramètres, connecteurs de tickets, import vers `.work/new`, saisie
  * à la main de features et de stories, suppression d'une fiche, panneau latéral,
  * vérification du CLI Claude Code.
- * Phase 2 : atelier de planification, de New à Ready.
+ * Phase 2 : atelier de planification, de New à Ready ; gabarits du dépôt.
  */
 
 import { promises as fs } from 'node:fs';
@@ -17,6 +17,7 @@ import { runImport } from './ui/importCommand.js';
 import { deleteCard } from './ui/deleteCommand.js';
 import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
+import { customizeTemplates } from './ui/templatesCommand.js';
 import {
   CONFIG_SECTION,
   deleteSecret,
@@ -128,6 +129,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('devbots.clearToken', () => clearToken(context, folder.uri)),
     vscode.commands.registerCommand('devbots.checkClaude', () =>
       reportClaudeStatus(folder.uri, log, true)
+    ),
+    vscode.commands.registerCommand('devbots.customizeTemplates', () =>
+      customizeTemplates({ repoUri: folder.uri, log })
     )
   );
 

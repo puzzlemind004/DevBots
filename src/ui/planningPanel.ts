@@ -6,7 +6,6 @@
  * afficher après chaque changement.
  */
 
-import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ClaudeError, createClaudeRunner } from '../core/claudeCli.js';
@@ -14,6 +13,7 @@ import type { Answer, PlanSection } from '../core/plan.js';
 import { PLAN_SECTIONS, PlanShapeError } from '../core/plan.js';
 import { PlanningError, PlanningSession } from '../core/planning.js';
 import { PlanStore } from '../core/planStore.js';
+import { resolveTemplate, TemplateError } from '../core/templates.js';
 import { WorkDir, type StoryFile } from '../core/workDir.js';
 import { readConfig } from '../util/config.js';
 
@@ -193,16 +193,22 @@ export class PlanningPanel {
 
   private async validate(): Promise<void> {
     const config = readConfig(this.ctx.repoUri);
-    let template: string | undefined;
-    if (config.planningTemplate) {
-      const templatePath = path.resolve(this.ctx.repoUri.fsPath, config.planningTemplate);
-      try {
-        template = await fs.readFile(templatePath, 'utf8');
-      } catch {
-        this.error = `Gabarit introuvable : ${config.planningTemplate}. Corrige le paramètre devbots.planning.template, ou vide-le pour le gabarit par défaut.`;
-        await this.post();
-        return;
-      }
+    let template: string;
+    try {
+      template = (
+        await resolveTemplate('plan', {
+          repoRoot: this.ctx.repoUri.fsPath,
+          workRoot: this.workRoot,
+          setting: config.planningTemplate
+        })
+      ).content;
+    } catch (err) {
+      this.error =
+        err instanceof TemplateError
+          ? `${err.message} Corrige le paramètre devbots.planning.template, ou vide-le pour utiliser templates/plan.md du dossier de travail, sinon le gabarit par défaut.`
+          : describe(err);
+      await this.post();
+      return;
     }
     try {
       const target = await this.session.validate(this.workRoot, template);

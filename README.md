@@ -26,7 +26,9 @@ Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
 - vérification du CLI Claude Code au démarrage ;
 - atelier de planification : compréhension et questions, plan structuré revu
   section par section, versions et diff, validation qui place la fiche dans
-  `ready/` (voir [Planification](docs/planification.md)).
+  `ready/` (voir [Planification](docs/planification.md)) ;
+- gabarits du plan et du CR remplaçables par ceux du dépôt, dans
+  `.work/templates/` (voir [Gabarits](docs/gabarits.md)).
 
 Les phases suivantes (agents de dev, review et merge) sont décrites dans la
 proposition.
@@ -53,7 +55,7 @@ contient (ou contiendra) un dossier `.work`.
 | `devbots.workDir` | Dossier du flux, `.work` par défaut |
 | `devbots.import.githubTrustedAuthorsOnly` | N'importe que tes issues et celles portant le label de confiance |
 | `devbots.planning.skill` | Skill de planification du dépôt (par exemple `plan-story`) ; vide : consigne générique |
-| `devbots.planning.template` | Gabarit de plan de story, relatif au dépôt ; vide : gabarit par défaut |
+| `devbots.planning.template` | Gabarit de plan de story, relatif au dépôt ; vide : `.work/templates/plan.md`, sinon le gabarit par défaut |
 | `devbots.planning.model` | Modèle de l'atelier, `opus` par défaut |
 | `devbots.planning.maxResumes` | Plafond de reprises d'une session de planification |
 | `devbots.agents.maxParallel` | Plafond d'agents de dev simultanés (phase 3) |
@@ -85,9 +87,11 @@ ni dans `.work`.
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
 | DevBots : effacer le jeton d'accès | Le retire |
 | DevBots : vérifier l'installation de Claude Code | Teste le CLI et sa version |
+| DevBots : personnaliser les gabarits | Dépose les gabarits par défaut du plan et du CR dans `.work/templates/`, sans écraser ceux qui existent, et les ouvre |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — les modules et leurs frontières
 - [Format des fiches](docs/format-fiches.md) — frontmatter, fiches locales et resynchronisation
 - [Planification](docs/planification.md) — l'atelier, le gabarit et `.work/plans`
+- [Gabarits](docs/gabarits.md) — plan et CR, ceux du dépôt ou ceux par défaut
