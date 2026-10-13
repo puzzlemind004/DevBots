@@ -24,7 +24,7 @@ src/
 │   └── planning.ts     L'atelier de planification, sans interface
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
-│   ├── azureDevOps.ts  Epic / feature → user stories
+│   ├── azureDevOps.ts  Work items ouverts, epic / feature → user stories
 │   └── factory.ts      Choix de la source et résolution de l'accès
 ├── ui/                 Ce qui touche à l'interface VS Code
 │   ├── flowTree.ts     Le panneau latéral
@@ -46,15 +46,15 @@ tests unitaires n'ont donc besoin d'aucun hôte VS Code. Les modules qui importe
 
 `TicketSource` expose deux opérations : `probe()` pour vérifier l'accès, et
 `fetchTree(rootId)` pour récupérer un ticket et sa descendance. Une troisième,
-`listCandidates()`, est optionnelle : la source GitHub l'implémente pour
-proposer les issues ouvertes du dépôt en liste à cocher. Azure DevOps ne
-l'implémente pas, et l'import y demande un identifiant. Les deux
+`listCandidates()`, propose les tickets ouverts en liste à cocher ; elle est
+optionnelle, et sans elle l'import demande un identifiant. Les deux
 implémentations produisent exactement les mêmes objets `Ticket`, si bien que le
 reste de l'extension ignore d'où viennent les stories.
 
 | | Azure DevOps | GitHub |
 | --- | --- | --- |
-| Point d'entrée | ID d'epic ou de feature | Issues cochées dans la liste des issues ouvertes, ou un numéro |
+| Point d'entrée | Epics, features et stories cochés dans la liste des work items ouverts, ou un ID | Issues cochées dans la liste des issues ouvertes, ou un numéro |
+| Liste à cocher | Requête WIQL par catégories de types, états terminaux exclus, groupée par niveau | Issues ouvertes, filtre d'auteur, groupées selon qu'elles ont des sub-issues |
 | Hiérarchie | Epic → feature → user story | Issue parente → sub-issues, sur plusieurs niveaux |
 | Dépendances | Liens prédécesseur / successeur | `Blocked by #12` dans le corps |
 | Critères d'acceptation | Champ dédié | Section `## Critères d'acceptation`, sinon vide |
@@ -64,6 +64,17 @@ reste de l'extension ignore d'où viennent les stories.
 Le niveau d'un ticket GitHub se déduit de sa place dans l'arbre, parce que les
 types d'issues n'existent qu'au niveau des organisations : la racine est l'epic,
 puis feature, puis story, et une feuille est toujours une story.
+
+Les parents directs des stories importées deviennent les fiches de
+`.work/features` (`storyGroups` dans `core/mergeTrees.ts`), quel que soit leur
+niveau chez la source : c'est ce qui range de la même façon, dans le panneau,
+les stories importées des deux sources et celles saisies à la main.
+
+La liste Azure DevOps s'appuie sur les catégories de types
+(`Microsoft.EpicCategory`, `FeatureCategory`, `RequirementCategory`) pour
+couvrir tous les processus, et exclut les états `Closed`, `Done` et `Removed`.
+Un processus personnalisé aux états terminaux renommés laissera passer les
+siens.
 
 ## Lecture seule chez la source
 

@@ -1,8 +1,8 @@
 # Format des fiches
 
 Une fiche par story, dans `.work/new`, `.work/ready` ou `.work/done`. Le format
-ne change pas : les skills existants continuent de les lire. Les features
-saisies à la main ont leur propre fiche, dans `.work/features`.
+ne change pas : les skills existants continuent de les lire. Les features,
+importées ou saisies à la main, ont leur propre fiche, dans `.work/features`.
 
 Nom du fichier : `<source_id>-<slug>.md`.
 
@@ -120,11 +120,47 @@ title: "Inscription par email"
 _À compléter : l'objectif de la feature et le contexte commun à ses stories._
 ```
 
+Une fiche locale n'a pas de source : la resynchronisation ne la touche jamais.
+
+## Fiches de feature
+
 Une feature ne passe pas par le flux : elle ne se planifie pas et ne bouge pas
 de dossier. Le panneau range sous elle les stories de New dont le `parent` est
 son identifiant, et l'atelier donne sa fiche à Claude comme contexte.
 
-Une fiche locale n'a pas de source : la resynchronisation ne la touche jamais.
+À l'import, tout ticket qui est le **parent direct d'une story importée**
+devient une fiche de `.work/features`, nommée `<source_id>-<slug>.md` : une
+feature Azure DevOps, une issue GitHub qui porte des sub-issues, ou un epic
+dont dépendent directement des stories. Un epic qui ne contient que des
+features ne laisse pas de fiche. Chez Azure DevOps, une story choisie seule
+vient avec sa feature parente, sans les autres stories de celle-ci.
+
+```markdown
+---
+source: "azureDevOps"
+source_id: "30"
+level: "feature"
+source_rev: "7"
+parent: "12"
+imported_at: "2026-10-13T08:00:00.000Z"
+title: "Inscription par email"
+state: "Active"
+web_url: "https://dev.azure.com/acme/web/_workitems/edit/30"
+---
+
+# Inscription par email
+
+## Description
+
+...
+
+---
+
+[Ouvrir dans la source](...)
+```
+
+Une feature ne porte ni plan ni échange : quand sa révision change, l'import
+la réécrit sur place, sans marquage « à revoir ».
 
 ## Resynchronisation
 

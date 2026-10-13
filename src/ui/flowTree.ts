@@ -160,7 +160,7 @@ function featureItem(node: FeatureNode): vscode.TreeItem {
   );
   item.description = node.stories.length > 0 ? String(node.stories.length) : 'aucune story';
   item.resourceUri = vscode.Uri.file(feature.filePath);
-  item.contextValue = 'feature';
+  item.contextValue = `feature${feature.frontmatter.web_url ? ':linked' : ''}`;
   item.iconPath = new vscode.ThemeIcon('layers');
   item.command = {
     command: 'devbots.openStory',
@@ -168,7 +168,14 @@ function featureItem(node: FeatureNode): vscode.TreeItem {
     arguments: [feature.filePath]
   };
   item.tooltip = new vscode.MarkdownString(
-    `**${feature.title}**\n\nFeature saisie à la main. Seules ses stories de New sont rangées ici.`
+    [
+      `**${feature.title}**`,
+      '',
+      feature.frontmatter.source === 'local'
+        ? 'Feature saisie à la main.'
+        : `Importée de ${feature.frontmatter.source ?? '?'}.`,
+      'Seules ses stories de New sont rangées ici.'
+    ].join('\n')
   );
   return item;
 }

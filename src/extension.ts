@@ -105,10 +105,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.window.showTextDocument(doc, { preview: true });
     }),
     vscode.commands.registerCommand('devbots.openInSource', async (node: FlowNode) => {
-      if (node?.kind !== 'story') {
+      const url =
+        node?.kind === 'story'
+          ? node.story.frontmatter.web_url
+          : node?.kind === 'feature'
+            ? node.feature.frontmatter.web_url
+            : undefined;
+      if (node?.kind === 'group') {
         return;
       }
-      const url = node.story.frontmatter.web_url;
       if (!url) {
         vscode.window.showWarningMessage("Cette fiche ne porte pas de lien vers la source.");
         return;

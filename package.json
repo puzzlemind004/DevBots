@@ -140,7 +140,7 @@
     "viewsWelcome": [
       {
         "view": "devbots.flow",
-        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\n[Ajouter une story à la main](command:devbots.newStory)\n\nSur GitHub, tu choisis dans la liste des issues ouvertes du dépôt. Les stories importées ou saisies arrivent dans `.work/new`."
+        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\n[Ajouter une story à la main](command:devbots.newStory)\n\nTu choisis dans la liste des issues GitHub ou des work items Azure DevOps ouverts. Les stories importées ou saisies arrivent dans `.work/new`."
       }
     ],
     "commands": [
@@ -222,12 +222,12 @@
         },
         {
           "command": "devbots.openInSource",
-          "when": "view == devbots.flow && viewItem =~ /story:.*:linked/",
+          "when": "view == devbots.flow && viewItem =~ /^(story|feature).*:linked/",
           "group": "inline@2"
         },
         {
           "command": "devbots.newStory",
-          "when": "view == devbots.flow && viewItem == feature",
+          "when": "view == devbots.flow && viewItem =~ /^feature/",
           "group": "inline@1"
         },
         {

@@ -5,7 +5,7 @@ import {
   type GitHubListedIssue,
   type TrustFilter
 } from '../../src/sources/github.js';
-import { mergeTrees } from '../../src/core/mergeTrees.js';
+import { mergeTrees, storyGroups } from '../../src/core/mergeTrees.js';
 import type { Ticket } from '../../src/core/model.js';
 
 function issue(overrides: Partial<GitHubListedIssue> = {}): GitHubListedIssue {
@@ -116,5 +116,42 @@ describe('mergeTrees', () => {
     const underParent = [ticket('4'), ticket('5', '4')];
     expect(mergeTrees([alone, underParent]).find((t) => t.sourceId === '5')?.parentId).toBe('4');
     expect(mergeTrees([underParent, alone]).find((t) => t.sourceId === '5')?.parentId).toBe('4');
+  });
+});
+
+describe('storyGroups', () => {
+  function ticket(sourceId: string, level: Ticket['level'], parentId?: string): Ticket {
+    const t: Ticket = {
+      sourceId,
+      level,
+      title: `Ticket ${sourceId}`,
+      description: '',
+      acceptanceCriteria: '',
+      state: 'open',
+      revision: 'r1',
+      webUrl: '',
+      dependencies: [],
+      attachments: []
+    };
+    if (parentId !== undefined) {
+      t.parentId = parentId;
+    }
+    return t;
+  }
+
+  it('retient les parents directs des stories, quel que soit leur niveau', () => {
+    const tickets = [
+      ticket('1', 'epic'),
+      ticket('2', 'feature', '1'),
+      ticket('3', 'story', '2'),
+      ticket('4', 'epic'),
+      ticket('5', 'story', '4')
+    ];
+    expect(storyGroups(tickets).map((t) => t.sourceId)).toEqual(['2', '4']);
+  });
+
+  it('ignore une feature sans story et un parent absent de l’import', () => {
+    const tickets = [ticket('2', 'feature'), ticket('3', 'story', '99')];
+    expect(storyGroups(tickets)).toEqual([]);
   });
 });

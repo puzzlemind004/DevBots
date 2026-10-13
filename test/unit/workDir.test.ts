@@ -121,6 +121,39 @@ describe('WorkDir', () => {
     const index = await workDir.indexBySourceId();
     expect([...index.keys()].sort()).toEqual(['42', '43']);
   });
+
+  describe('features importées', () => {
+    const feature = (overrides: Partial<Ticket> = {}) =>
+      ticket({ sourceId: '30', level: 'feature', title: 'Inscription', ...overrides });
+
+    it('écrit la fiche dans features/, avec son lien vers la source', async () => {
+      const [result] = await workDir.importFeatures([feature()], 'github');
+      expect(result?.outcome).toBe('created');
+      expect(path.basename(result!.filePath)).toBe('30-inscription.md');
+
+      const listed = await workDir.findFeature('30');
+      expect(listed?.frontmatter.source).toBe('github');
+      expect(listed?.frontmatter.level).toBe('feature');
+      expect(listed?.frontmatter.web_url).toBe('https://github.com/acme/web/issues/42');
+      expect(await fs.readFile(result!.filePath, 'utf8')).toContain('[Ouvrir dans la source]');
+    });
+
+    it('ne réécrit pas une révision connue, et réécrit sur place une révision nouvelle', async () => {
+      const [first] = await workDir.importFeatures([feature()], 'github');
+      const [same] = await workDir.importFeatures([feature()], 'github');
+      expect(same?.outcome).toBe('unchanged');
+
+      const [changed] = await workDir.importFeatures(
+        [feature({ revision: 'rev-2', title: 'Inscription v2' })],
+        'github'
+      );
+      expect(changed?.outcome).toBe('created');
+      expect(changed?.filePath).toBe(first?.filePath);
+      expect((await workDir.findFeature('30'))?.title).toBe('Inscription v2');
+      expect(await workDir.listFeatures()).toHaveLength(1);
+    });
+  });
+
   describe('saisie à la main', () => {
     it('crée une feature puis une story rattachée, numérotées à part', async () => {
       const feature = await workDir.createFeature('Inscription');

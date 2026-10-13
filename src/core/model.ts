@@ -81,12 +81,23 @@ export type SourceKind = 'github' | 'azureDevOps';
 /** Origine d'une fiche : une source de tickets, ou une saisie à la main (`LOCAL-<n>`). */
 export type CardSource = SourceKind | 'local';
 
-/** Le frontmatter d'une fiche de feature de `.work/features`, toujours saisie à la main. */
+/**
+ * Le frontmatter d'une fiche de `.work/features` : le ticket qui regroupe des
+ * stories, importé ou saisi à la main. Côté source, ce peut être une feature, ou
+ * une issue parente GitHub ou un epic dont dépendent directement des stories.
+ */
 export interface FeatureFrontmatter {
-  source: 'local';
+  source: CardSource;
   source_id: string;
   level: 'feature';
-  created_at: string;
+  /** Les cinq champs suivants n'existent que pour une fiche importée. */
+  source_rev?: string;
+  parent?: string | null;
+  imported_at?: string;
+  state?: string;
+  web_url?: string;
+  /** Date de création d'une fiche saisie à la main. */
+  created_at?: string;
   title: string;
 }
 
@@ -96,7 +107,10 @@ export interface TicketSource {
   /**
    * Récupère un ticket et toute sa descendance, dans l'ordre de la hiérarchie.
    *
-   * @param rootId Identifiant d'epic, de feature (ADO) ou d'issue parente (GitHub).
+   * Une story choisie seule chez Azure DevOps vient avec sa feature parente,
+   * sans le reste de sa descendance, pour que sa fiche reste rangée sous elle.
+   *
+   * @param rootId Identifiant de work item (ADO) ou d'issue (GitHub).
    */
   fetchTree(rootId: string, token?: CancellationLike): Promise<Ticket[]>;
   /** Vérifie la connexion et les droits en lecture. */
@@ -104,8 +118,7 @@ export interface TicketSource {
   /**
    * Liste les tickets ouverts qui peuvent servir de racine d'import.
    *
-   * Optionnel : seule la source GitHub l'implémente. Sans elle, l'import
-   * demande un identifiant.
+   * Optionnel : sans elle, l'import demande un identifiant.
    */
   listCandidates?(token?: CancellationLike): Promise<CandidateListing>;
 }
@@ -116,8 +129,12 @@ export interface TicketCandidate {
   title: string;
   labels: string[];
   authorLogin?: string;
-  /** Nombre de sub-issues, quand la source le fournit. */
+  /** Nombre d'enfants (sub-issues, work items), quand la source le fournit. */
   childCount?: number;
+  /** Niveau, quand la source le connaît sans parcourir l'arbre (Azure DevOps). */
+  level?: TicketLevel;
+  /** Parent direct, quand la source le fournit dans la liste. */
+  parentId?: string;
   updatedAt: string;
   webUrl: string;
 }

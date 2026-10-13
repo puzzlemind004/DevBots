@@ -11,7 +11,12 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import matter from 'gray-matter';
 import type { FeatureFrontmatter, SourceKind, StoryFrontmatter, Ticket } from './model.js';
-import { cardFileName, renderStoryCard, storyFileName } from './storyCard.js';
+import {
+  cardFileName,
+  renderImportedFeatureCard,
+  renderStoryCard,
+  storyFileName
+} from './storyCard.js';
 import {
   LOCAL_FEATURE_PREFIX,
   LOCAL_STORY_PREFIX,
@@ -208,6 +213,36 @@ export class WorkDir {
           filePath: known.filePath
         });
       }
+    }
+    return results;
+  }
+
+  /**
+   * Écrit dans `features/` les tickets qui regroupent des stories.
+   *
+   * Une feature ne porte ni plan ni échange : une révision nouvelle la réécrit
+   * sur place, sans marquage « à revoir ».
+   */
+  async importFeatures(
+    tickets: Ticket[],
+    source: SourceKind,
+    importedAt = new Date()
+  ): Promise<ImportResult[]> {
+    const existing = new Map(
+      (await this.listFeatures()).map((f) => [f.frontmatter.source_id, f] as const)
+    );
+    const results: ImportResult[] = [];
+    for (const ticket of tickets) {
+      const known = existing.get(ticket.sourceId);
+      const result = { sourceId: ticket.sourceId, title: ticket.title };
+      if (known?.frontmatter.source_rev === ticket.revision) {
+        results.push({ ...result, outcome: 'unchanged', filePath: known.filePath });
+        continue;
+      }
+      await fs.mkdir(this.featuresPath(), { recursive: true });
+      const filePath = known?.filePath ?? path.join(this.featuresPath(), storyFileName(ticket));
+      await fs.writeFile(filePath, renderImportedFeatureCard(ticket, source, importedAt), 'utf8');
+      results.push({ ...result, outcome: 'created', filePath });
     }
     return results;
   }

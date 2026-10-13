@@ -5,7 +5,7 @@
  * critères d'acceptation, dépendances. Les skills existants continuent de les lire.
  */
 
-import type { StoryFrontmatter, Ticket } from './model.js';
+import type { FeatureFrontmatter, StoryFrontmatter, Ticket } from './model.js';
 import type { SourceKind } from './model.js';
 
 /** Nom de fichier d'une story : `<id>-<slug>.md`. */
@@ -102,6 +102,39 @@ function yamlScalar(value: string | number | boolean | null): string {
   // Les titres contiennent des deux-points et des apostrophes : on cite en double
   // et on échappe les guillemets et les antislashs.
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/** Fabrique la fiche de `.work/features` d'un ticket qui regroupe des stories. */
+export function renderImportedFeatureCard(
+  ticket: Ticket,
+  source: SourceKind,
+  importedAt: Date
+): string {
+  const fm: FeatureFrontmatter = {
+    source,
+    source_id: ticket.sourceId,
+    level: 'feature',
+    source_rev: ticket.revision,
+    parent: ticket.parentId ?? null,
+    imported_at: importedAt.toISOString(),
+    title: ticket.title,
+    state: ticket.state,
+    web_url: ticket.webUrl
+  };
+  return [
+    renderFrontmatter(fm),
+    '',
+    `# ${ticket.title}`,
+    '',
+    '## Description',
+    '',
+    ticket.description.trim() || '_Aucune description dans la source._',
+    '',
+    '---',
+    '',
+    `[Ouvrir dans la source](${ticket.webUrl})`,
+    ''
+  ].join('\n');
 }
 
 /** Fabrique le contenu complet d'une fiche de story. */

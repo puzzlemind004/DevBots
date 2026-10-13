@@ -1,9 +1,10 @@
 /**
  * La commande d'import : remplit `.work/new` depuis la source.
  *
- * Côté GitHub, les issues ouvertes du dépôt sont proposées en liste à cocher ;
- * ailleurs, ou à la demande, un identifiant suffit. Rien n'est écrit dans la
- * source.
+ * Les issues ouvertes du dépôt GitHub, ou les epics, features et stories
+ * ouverts du projet Azure DevOps, sont proposés en liste à cocher ; à la
+ * demande, un identifiant suffit. Les tickets qui regroupent des stories
+ * deviennent des fiches de `.work/features`. Rien n'est écrit dans la source.
  */
 
 import * as vscode from 'vscode';
@@ -14,9 +15,9 @@ import type {
   TicketCandidate,
   TicketSource
 } from '../core/model.js';
-import type { ImportResult, StoryFile } from '../core/workDir.js';
+import type { ImportResult } from '../core/workDir.js';
 import { WorkDir } from '../core/workDir.js';
-import { mergeTrees } from '../core/mergeTrees.js';
+import { mergeTrees, storyGroups } from '../core/mergeTrees.js';
 import { ConfigError, createSource } from '../sources/factory.js';
 import { readConfig, sourceLabel, type DevBotsConfig } from '../util/config.js';
 
@@ -89,9 +90,10 @@ export async function runImport(ctx: ImportContext): Promise<void> {
           return;
         }
 
-        // Seules les stories deviennent des fiches : les epics et features ne
-        // servent qu'à retrouver la hiérarchie et le parent.
-        const stories = mergeTrees(trees).filter((t) => t.level === 'story');
+        // Les stories deviennent des fiches du flux, leurs parents directs des
+        // fiches de features ; un epic sans story directe ne laisse pas de trace.
+        const merged = mergeTrees(trees);
+        const stories = merged.filter((t) => t.level === 'story');
         if (stories.length === 0) {
           vscode.window.showWarningMessage(
             `Aucune story trouvée sous ${roots.join(', ')}. Vérifie que l'élément a bien des enfants.`
@@ -101,9 +103,10 @@ export async function runImport(ctx: ImportContext): Promise<void> {
 
         progress.report({ message: `écriture de ${stories.length} fiche(s)…` });
         const results = await workDir.importTickets(stories, config.sourceKind);
+        const features = await workDir.importFeatures(storyGroups(merged), config.sourceKind);
 
         ctx.onImported();
-        reportResults(results, failures, config.sourceKind, ctx.log);
+        reportResults(results, features, failures, config.sourceKind, ctx.log);
       } catch (err) {
         await reportError(err, ctx.log);
       }
@@ -148,7 +151,10 @@ async function pickCandidates(
   quickPick.matchOnDetail = true;
   quickPick.ignoreFocusOut = true;
   quickPick.buttons = [manualEntry];
-  quickPick.placeholder = 'Lecture des issues ouvertes…';
+  quickPick.placeholder =
+    config.sourceKind === 'github'
+      ? 'Lecture des issues ouvertes…'
+      : 'Lecture des work items ouverts…';
   quickPick.busy = true;
 
   const loading = new vscode.CancellationTokenSource();
@@ -178,12 +184,9 @@ async function pickCandidates(
   quickPick.show();
 
   try {
-    const [listing, existing] = await Promise.all([
-      list(loading.token),
-      workDir.indexBySourceId()
-    ]);
+    const [listing, known] = await Promise.all([list(loading.token), knownLocations(workDir)]);
     if (!hidden) {
-      quickPick.items = buildItems(listing.candidates, existing);
+      quickPick.items = buildItems(listing.candidates, known);
       quickPick.placeholder = placeholderFor(listing, config);
       quickPick.busy = false;
     }
@@ -201,33 +204,62 @@ async function pickCandidates(
   return picked;
 }
 
-/** Les issues parentes d'abord : ce sont elles qui portent un lot de stories. */
-function buildItems(
-  candidates: TicketCandidate[],
-  existing: Map<string, StoryFile>
-): CandidatePick[] {
+/** Où chaque ticket déjà importé se trouve : un dossier du flux, ou `features`. */
+async function knownLocations(workDir: WorkDir): Promise<Map<string, string>> {
+  const known = new Map<string, string>();
+  for (const feature of await workDir.listFeatures()) {
+    known.set(feature.frontmatter.source_id, 'features');
+  }
+  for (const [id, story] of await workDir.indexBySourceId()) {
+    known.set(id, story.folder);
+  }
+  return known;
+}
+
+/**
+ * Les tickets qui portent un lot de stories d'abord. Azure DevOps donne le
+ * niveau de chaque work item ; GitHub ne le connaît qu'en parcourant l'arbre, et
+ * l'on s'y fie alors au nombre de sub-issues.
+ */
+function buildItems(candidates: TicketCandidate[], known: Map<string, string>): CandidatePick[] {
+  const titles = new Map(candidates.map((c) => [c.sourceId, c.title]));
   const items: CandidatePick[] = [];
   const section = (title: string, group: TicketCandidate[]): void => {
     if (group.length === 0) {
       return;
     }
     items.push({ label: title, kind: vscode.QuickPickItemKind.Separator, sourceId: '' });
-    items.push(...group.map((c) => toItem(c, existing.get(c.sourceId))));
+    items.push(...group.map((c) => toItem(c, known.get(c.sourceId), titles)));
   };
-  section('Issues parentes', candidates.filter((c) => (c.childCount ?? 0) > 0));
-  section('Issues', candidates.filter((c) => (c.childCount ?? 0) === 0));
+  if (candidates.some((c) => c.level !== undefined)) {
+    section('Epics', candidates.filter((c) => c.level === 'epic'));
+    section('Features', candidates.filter((c) => c.level === 'feature'));
+    section('Stories', candidates.filter((c) => c.level === 'story'));
+  } else {
+    section('Issues parentes', candidates.filter((c) => (c.childCount ?? 0) > 0));
+    section('Issues', candidates.filter((c) => (c.childCount ?? 0) === 0));
+  }
   return items;
 }
 
-function toItem(candidate: TicketCandidate, known: StoryFile | undefined): CandidatePick {
+function toItem(
+  candidate: TicketCandidate,
+  knownIn: string | undefined,
+  titles: Map<string, string>
+): CandidatePick {
   const description: string[] = [];
   if (candidate.childCount) {
-    description.push(`$(list-tree) ${candidate.childCount} sub-issue(s)`);
+    const unit = candidate.level === undefined ? 'sub-issue(s)' : 'enfant(s)';
+    description.push(`$(list-tree) ${candidate.childCount} ${unit}`);
   }
-  if (known) {
-    description.push(`$(check) déjà dans ${known.folder}`);
+  if (knownIn) {
+    description.push(`$(check) déjà dans ${knownIn}`);
   }
   const detail: string[] = [];
+  if (candidate.parentId) {
+    const parentTitle = titles.get(candidate.parentId);
+    detail.push(`sous ${candidate.parentId}${parentTitle ? ` ${parentTitle}` : ''}`);
+  }
   if (candidate.labels.length > 0) {
     detail.push(candidate.labels.join(', '));
   }
@@ -252,21 +284,27 @@ function placeholderFor(listing: CandidateListing, config: DevBotsConfig): strin
   if (listing.truncated) {
     notes.push('liste coupée aux plus récentes');
   }
+  const github = config.sourceKind === 'github';
   const base =
     listing.candidates.length > 0
-      ? 'Coche les issues à importer. Une issue parente importe ses sub-issues.'
-      : 'Aucune issue ouverte importable. Le crayon permet de saisir un numéro.';
+      ? github
+        ? 'Coche les issues à importer. Une issue parente importe ses sub-issues.'
+        : 'Coche les work items à importer. Un epic ou une feature importe ses stories ; une story seule vient avec sa feature.'
+      : github
+        ? 'Aucune issue ouverte importable. Le crayon permet de saisir un numéro.'
+        : 'Aucun work item ouvert. Le crayon permet de saisir un ID.';
   return notes.length > 0 ? `${base} — ${notes.join(' ; ')}` : base;
 }
 
 function promptFor(kind: SourceKind): string {
   return kind === 'github'
     ? "Numéro de l'issue parente. Ses sub-issues deviennent les stories de .work/new."
-    : "ID de l'epic ou de la feature. Ses user stories deviennent les fiches de .work/new.";
+    : "ID d'un epic, d'une feature ou d'une story. Les stories deviennent les fiches de .work/new.";
 }
 
 function reportResults(
   results: ImportResult[],
+  features: ImportResult[],
   failures: string[],
   source: SourceKind,
   log: vscode.LogOutputChannel
@@ -275,13 +313,21 @@ function reportResults(
   const unchanged = results.filter((r) => r.outcome === 'unchanged').length;
   const needsReview = results.filter((r) => r.outcome === 'needsReview');
 
+  const featuresWritten = features.filter((r) => r.outcome === 'created').length;
+
   for (const result of results) {
     log.info(`[${source}] ${result.sourceId} ${result.outcome} — ${result.title}`);
+  }
+  for (const result of features) {
+    log.info(`[${source}] feature ${result.sourceId} ${result.outcome} — ${result.title}`);
   }
 
   const parts: string[] = [];
   if (created > 0) {
     parts.push(`${created} fiche(s) écrite(s)`);
+  }
+  if (featuresWritten > 0) {
+    parts.push(`${featuresWritten} feature(s) écrite(s)`);
   }
   if (unchanged > 0) {
     parts.push(`${unchanged} inchangée(s)`);
