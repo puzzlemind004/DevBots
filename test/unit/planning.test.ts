@@ -55,6 +55,22 @@ describe('PlanningSession', () => {
   const open = () =>
     PlanningSession.open({ store, runner: claude.run, repoRoot: root, settings: SETTINGS }, storyFile, '42', 'Valider');
 
+  it('indique la fiche de la feature parente dans le premier prompt', async () => {
+    const featureFile = path.join(work, 'features', 'LOCAL-F1-inscription.md');
+    claude.reply(sampleUnderstanding());
+    const session = await PlanningSession.open(
+      { store, runner: claude.run, repoRoot: root, settings: SETTINGS },
+      storyFile,
+      '42',
+      'Valider',
+      featureFile
+    );
+    await session.understand();
+    expect(claude.requests[0]!.prompt).toContain(
+      'Fiche de sa feature, à lire pour le contexte commun : .work/features/LOCAL-F1-inscription.md'
+    );
+  });
+
   it('ouvre une session neuve avec le skill, puis la reprend', async () => {
     claude.reply(sampleUnderstanding());
     const session = await open();

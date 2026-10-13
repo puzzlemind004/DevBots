@@ -75,7 +75,9 @@ export class PlanningSession {
     readonly storyFile: string,
     private rawCard: string,
     readonly context: PlanContext,
-    readonly state: PlanningState
+    readonly state: PlanningState,
+    /** Chemin absolu de la fiche de la feature parente, quand elle existe. */
+    readonly featureFile?: string
   ) {}
 
   /** Ouvre la planification d'une fiche, en reprenant l'état enregistré s'il existe. */
@@ -83,11 +85,19 @@ export class PlanningSession {
     deps: PlanningDeps,
     storyFile: string,
     storyId: string,
-    title: string
+    title: string,
+    featureFile?: string
   ): Promise<PlanningSession> {
     const rawCard = await fs.readFile(storyFile, 'utf8');
     const state = (await deps.store.load(storyId)) ?? newPlanningState(storyId, title);
-    const session = new PlanningSession(deps, storyFile, rawCard, readPlanContext(rawCard), state);
+    const session = new PlanningSession(
+      deps,
+      storyFile,
+      rawCard,
+      readPlanContext(rawCard),
+      state,
+      featureFile
+    );
     const last = state.versions.at(-1);
     if (last) {
       session.plan = await deps.store.readVersion(storyId, last.version);
@@ -322,7 +332,11 @@ export class PlanningSession {
   }
 
   private storyPath(): string {
-    return path.relative(this.deps.repoRoot, this.storyFile).split(path.sep).join('/');
+    return this.repoPath(this.storyFile);
+  }
+
+  private repoPath(filePath: string): string {
+    return path.relative(this.deps.repoRoot, filePath).split(path.sep).join('/');
   }
 
   private criteriaBlock(): string {
@@ -355,6 +369,9 @@ export class PlanningSession {
       `Planification de la story ${this.state.storyId} — phase 1 : compréhension.`,
       '',
       `Fiche de la story : ${this.storyPath()}`,
+      ...(this.featureFile
+        ? [`Fiche de sa feature, à lire pour le contexte commun : ${this.repoPath(this.featureFile)}`]
+        : []),
       '',
       this.criteriaBlock(),
       '',

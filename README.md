@@ -16,7 +16,9 @@ Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
 - côté GitHub, choix des issues dans la liste des issues ouvertes du dépôt ;
 - connecteur Azure DevOps : un epic ou une feature et ses user stories ;
 - import vers `.work/new`, avec marquage « à revoir » au lieu d'un écrasement ;
-- panneau latéral en lecture (New, Ready, Done) ;
+- saisie à la main de features (`LOCAL-F<n>`) et de stories (`LOCAL-<n>`),
+  en fiches pré-remplies à compléter dans l'éditeur ;
+- panneau latéral (New, Ready, Done), les stories de New rangées sous leur feature ;
 - vérification du CLI Claude Code au démarrage ;
 - atelier de planification : compréhension et questions, plan structuré revu
   section par section, versions et diff, validation qui place la fiche dans
@@ -71,6 +73,8 @@ ni dans `.work`.
 | Commande | Effet |
 | --- | --- |
 | DevBots : importer des tickets | GitHub : liste à cocher des issues ouvertes (le crayon garde la saisie d'un numéro). Azure DevOps : demande un ID. Remplit `.work/new` |
+| DevBots : nouvelle story | Demande la feature (ou en crée une) et le titre, écrit une fiche `LOCAL-<n>` dans `.work/new` et l'ouvre (aussi : le `+` du panneau, de New ou d'une feature) |
+| DevBots : nouvelle feature | Écrit une fiche `LOCAL-F<n>` dans `.work/features` et l'ouvre |
 | DevBots : planifier la story | Ouvre l'atelier d'une story de New (aussi : l'ampoule sur la story) |
 | DevBots : rafraîchir le flux | Relit `.work` |
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
@@ -80,5 +84,5 @@ ni dans `.work`.
 ## Documentation
 
 - [Architecture](docs/architecture.md) — les modules et leurs frontières
-- [Format des fiches](docs/format-fiches.md) — frontmatter et resynchronisation
+- [Format des fiches](docs/format-fiches.md) — frontmatter, fiches locales et resynchronisation
 - [Planification](docs/planification.md) — l'atelier, le gabarit et `.work/plans`

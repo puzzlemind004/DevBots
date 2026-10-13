@@ -56,14 +56,17 @@ export interface Ticket {
 
 /** Le frontmatter écrit en tête de chaque fiche de `.work/new`. */
 export interface StoryFrontmatter {
-  source: SourceKind;
+  source: CardSource;
   source_id: string;
-  source_rev: string;
+  /** Les quatre champs suivants n'existent que pour une fiche importée. */
+  source_rev?: string;
+  imported_at?: string;
+  web_url?: string;
+  /** Date de création d'une fiche saisie à la main. */
+  created_at?: string;
   parent: string | null;
-  imported_at: string;
   title: string;
   state: string;
-  web_url: string;
   dependencies?: string[];
   story_points?: number;
   priority?: number;
@@ -74,6 +77,18 @@ export interface StoryFrontmatter {
 }
 
 export type SourceKind = 'github' | 'azureDevOps';
+
+/** Origine d'une fiche : une source de tickets, ou une saisie à la main (`LOCAL-<n>`). */
+export type CardSource = SourceKind | 'local';
+
+/** Le frontmatter d'une fiche de feature de `.work/features`, toujours saisie à la main. */
+export interface FeatureFrontmatter {
+  source: 'local';
+  source_id: string;
+  level: 'feature';
+  created_at: string;
+  title: string;
+}
 
 /** Ce qu'une source doit savoir faire. Lecture seule : rien n'est écrit chez elle. */
 export interface TicketSource {

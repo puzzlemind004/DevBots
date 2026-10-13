@@ -121,4 +121,46 @@ describe('WorkDir', () => {
     const index = await workDir.indexBySourceId();
     expect([...index.keys()].sort()).toEqual(['42', '43']);
   });
+  describe('saisie à la main', () => {
+    it('crée une feature puis une story rattachée, numérotées à part', async () => {
+      const feature = await workDir.createFeature('Inscription');
+      expect(feature.id).toBe('LOCAL-F1');
+      expect(path.basename(feature.filePath)).toBe('LOCAL-F1-inscription.md');
+
+      const story = await workDir.createLocalStory('Valider un email', feature.id);
+      expect(story.id).toBe('LOCAL-1');
+
+      const [listed] = await workDir.listStories('new');
+      expect(listed?.frontmatter.source).toBe('local');
+      expect(listed?.frontmatter.parent).toBe('LOCAL-F1');
+      expect((await workDir.findFeature('LOCAL-F1'))?.title).toBe('Inscription');
+      expect(await workDir.findFeature(null)).toBeUndefined();
+    });
+
+    it("ne range pas les features parmi les stories du flux", async () => {
+      await workDir.createFeature('Inscription');
+      expect(await workDir.indexBySourceId()).toEqual(new Map());
+    });
+
+    it('numérote après les stories locales de tout le flux et les ateliers restés', async () => {
+      await workDir.ensureFolders();
+      await fs.writeFile(
+        path.join(root, '.work', 'ready', 'LOCAL-4-x.md'),
+        '---\nsource: "local"\nsource_id: "LOCAL-4"\ntitle: "x"\n---\n',
+        'utf8'
+      );
+      await fs.mkdir(path.join(root, '.work', 'plans', 'LOCAL-9'), { recursive: true });
+      const story = await workDir.createLocalStory('Suivante', null);
+      expect(story.id).toBe('LOCAL-10');
+    });
+
+    it('trie LOCAL-2 avant LOCAL-10', async () => {
+      for (let i = 0; i < 10; i++) {
+        await workDir.createLocalStory(`Story ${i}`, null);
+      }
+      const ids = (await workDir.listStories('new')).map((s) => s.frontmatter.source_id);
+      expect(ids.slice(0, 2)).toEqual(['LOCAL-1', 'LOCAL-2']);
+      expect(ids.at(-1)).toBe('LOCAL-10');
+    });
+  });
 });

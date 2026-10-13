@@ -1,16 +1,20 @@
 /**
  * Point d'entrée de l'extension DevBots.
  *
- * Phase 1 : paramètres, connecteurs de tickets, import vers `.work/new`,
- * panneau latéral en lecture, vérification du CLI Claude Code.
+ * Phase 1 : paramètres, connecteurs de tickets, import vers `.work/new`, saisie
+ * à la main de features et de stories, panneau latéral en lecture, vérification
+ * du CLI Claude Code.
  * Phase 2 : atelier de planification, de New à Ready.
  */
 
+import { promises as fs } from 'node:fs';
 import * as vscode from 'vscode';
 import { WorkDir, type StoryFile } from './core/workDir.js';
 import { checkClaude } from './core/claudeCli.js';
+import { isIncomplete } from './core/localCards.js';
 import { FlowTreeProvider, type FlowNode } from './ui/flowTree.js';
 import { runImport } from './ui/importCommand.js';
+import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
 import {
   CONFIG_SECTION,
@@ -71,10 +75,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onImported: () => tree.refresh()
       })
     ),
+    vscode.commands.registerCommand('devbots.newFeature', () =>
+      newFeature({ repoUri: folder.uri, log, onCreated: () => tree.refresh() })
+    ),
+    vscode.commands.registerCommand('devbots.newStory', (node?: FlowNode) =>
+      newStory({ repoUri: folder.uri, log, onCreated: () => tree.refresh() }, node)
+    ),
     vscode.commands.registerCommand('devbots.refresh', () => tree.refresh()),
     vscode.commands.registerCommand('devbots.planStory', async (node?: FlowNode) => {
       const story = node?.kind === 'story' ? node.story : await pickNewStory(folder.uri);
-      if (!story) {
+      if (!story || !(await confirmComplete(story))) {
         return;
       }
       try {
@@ -167,7 +177,9 @@ async function pickNewStory(scope: vscode.Uri): Promise<StoryFile | undefined> {
   const workDir = new WorkDir(vscode.Uri.joinPath(scope, readConfig(scope).workDir).fsPath);
   const stories = await workDir.listStories('new');
   if (stories.length === 0) {
-    vscode.window.showInformationMessage("Aucune story dans New. Importe des tickets d'abord.");
+    vscode.window.showInformationMessage(
+      "Aucune story dans New. Importe des tickets ou ajoute une story à la main d'abord."
+    );
     return undefined;
   }
   const picked = await vscode.window.showQuickPick<StoryPick>(
@@ -178,6 +190,26 @@ async function pickNewStory(scope: vscode.Uri): Promise<StoryFile | undefined> {
     { title: 'Quelle story planifier ?', matchOnDescription: true }
   );
   return picked?.story;
+}
+
+/**
+ * Une fiche saisie à la main garde ses mentions « À compléter » tant qu'elle
+ * n'est pas remplie : Claude planifierait sur du vide. On le signale.
+ */
+async function confirmComplete(story: StoryFile): Promise<boolean> {
+  const raw = await fs.readFile(story.filePath, 'utf8');
+  if (!isIncomplete(raw)) {
+    return true;
+  }
+  const chosen = await vscode.window.showWarningMessage(
+    `La fiche ${story.frontmatter.source_id} contient encore des mentions « À compléter ».`,
+    'Compléter la fiche',
+    'Planifier quand même'
+  );
+  if (chosen === 'Compléter la fiche') {
+    await vscode.commands.executeCommand('devbots.openStory', story.filePath);
+  }
+  return chosen === 'Planifier quand même';
 }
 
 /** `kind` est réservé par QuickPickItem : la source voyage dans `source`. */

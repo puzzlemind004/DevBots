@@ -10,7 +10,12 @@ import type { SourceKind } from './model.js';
 
 /** Nom de fichier d'une story : `<id>-<slug>.md`. */
 export function storyFileName(ticket: Ticket): string {
-  return `${ticket.sourceId}-${slugify(ticket.title)}.md`;
+  return cardFileName(ticket.sourceId, ticket.title);
+}
+
+/** Nom de fichier d'une fiche, importée ou locale : `<id>-<slug>.md`. */
+export function cardFileName(id: string, title: string): string {
+  return `${id}-${slugify(title)}.md`;
 }
 
 /**
@@ -64,10 +69,13 @@ export function buildFrontmatter(
   return fm;
 }
 
+/** Une valeur de frontmatter que `renderFrontmatter` sait écrire. */
+type FrontmatterValue = string | number | null | string[] | boolean | undefined;
+
 /** Rend le frontmatter en YAML. Les valeurs sont toujours citées pour éviter les surprises de typage. */
-export function renderFrontmatter(fm: StoryFrontmatter): string {
+export function renderFrontmatter(fm: object): string {
   const lines: string[] = ['---'];
-  for (const [key, value] of Object.entries(fm)) {
+  for (const [key, value] of Object.entries(fm) as Array<[string, FrontmatterValue]>) {
     if (value === undefined) {
       continue;
     }
@@ -84,11 +92,11 @@ export function renderFrontmatter(fm: StoryFrontmatter): string {
   return lines.join('\n');
 }
 
-function yamlScalar(value: string | number | null): string {
+function yamlScalar(value: string | number | boolean | null): string {
   if (value === null) {
     return 'null';
   }
-  if (typeof value === 'number') {
+  if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
   // Les titres contiennent des deux-points et des apostrophes : on cite en double

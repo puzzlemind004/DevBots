@@ -2,15 +2,23 @@
  * Lecture et écriture du dossier `.work`.
  *
  * Le format existant ne change pas : `new/`, `ready/`, `done/` contiennent une
- * fiche markdown par story, `plans/` garde les ateliers de planification, et
- * `state.json` (phase 3) tiendra l'état du flux.
+ * fiche markdown par story, `features/` les features saisies à la main, `plans/`
+ * garde les ateliers de planification, et `state.json` (phase 3) tiendra l'état
+ * du flux.
  */
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import matter from 'gray-matter';
-import type { SourceKind, StoryFrontmatter, Ticket } from './model.js';
-import { renderStoryCard, storyFileName } from './storyCard.js';
+import type { FeatureFrontmatter, SourceKind, StoryFrontmatter, Ticket } from './model.js';
+import { cardFileName, renderStoryCard, storyFileName } from './storyCard.js';
+import {
+  LOCAL_FEATURE_PREFIX,
+  LOCAL_STORY_PREFIX,
+  nextLocalId,
+  renderFeatureCard,
+  renderLocalStoryCard
+} from './localCards.js';
 
 /** Les groupes du panneau qui correspondent à un dossier sur disque. */
 export type StoryFolder = 'new' | 'ready' | 'done';
@@ -30,6 +38,19 @@ export interface StoryFile {
   folder: StoryFolder;
   frontmatter: Partial<StoryFrontmatter> & { source_id: string };
   title: string;
+}
+
+/** Une fiche de feature lue dans `features/`. */
+export interface FeatureFile {
+  filePath: string;
+  frontmatter: Partial<FeatureFrontmatter> & { source_id: string };
+  title: string;
+}
+
+/** Une fiche saisie à la main, juste écrite. */
+export interface CreatedCard {
+  id: string;
+  filePath: string;
 }
 
 /** Ce qu'un import a fait d'un ticket. */
@@ -55,6 +76,11 @@ export class WorkDir {
     return path.join(this.root, 'plans');
   }
 
+  /** Dossier des features saisies à la main : `.work/features/`. */
+  featuresPath(): string {
+    return path.join(this.root, 'features');
+  }
+
   async ensureFolders(): Promise<void> {
     for (const folder of STORY_FOLDERS) {
       await fs.mkdir(this.folderPath(folder), { recursive: true });
@@ -63,50 +89,68 @@ export class WorkDir {
 
   /** Toutes les fiches d'un dossier, triées par identifiant de source. */
   async listStories(folder: StoryFolder): Promise<StoryFile[]> {
-    const dir = this.folderPath(folder);
-    let names: string[];
+    const cards = await readCards<StoryFrontmatter>(this.folderPath(folder));
+    return cards.map((card) => ({ ...card, folder }));
+  }
+
+  /** Les features de `features/`, triées par identifiant. */
+  async listFeatures(): Promise<FeatureFile[]> {
+    return readCards<FeatureFrontmatter>(this.featuresPath());
+  }
+
+  /** La fiche d'une feature, d'après l'identifiant porté par le `parent` d'une story. */
+  async findFeature(id: string | null | undefined): Promise<FeatureFile | undefined> {
+    if (id === undefined || id === null) {
+      return undefined;
+    }
+    return (await this.listFeatures()).find((f) => f.frontmatter.source_id === String(id));
+  }
+
+  /** Crée une feature `LOCAL-F<n>` pré-remplie. */
+  async createFeature(title: string, createdAt = new Date()): Promise<CreatedCard> {
+    const taken = (await this.listFeatures()).map((f) => f.frontmatter.source_id);
+    const id = nextLocalId(LOCAL_FEATURE_PREFIX, taken);
+    await fs.mkdir(this.featuresPath(), { recursive: true });
+    const filePath = path.join(this.featuresPath(), cardFileName(id, title));
+    // `wx` : une fiche existante n'est jamais écrasée.
+    await fs.writeFile(filePath, renderFeatureCard({ id, title, createdAt }), {
+      encoding: 'utf8',
+      flag: 'wx'
+    });
+    return { id, filePath };
+  }
+
+  /**
+   * Crée une story `LOCAL-<n>` pré-remplie dans `new/`.
+   *
+   * Les identifiants déjà vus dans `plans/` comptent aussi : une story
+   * supprimée laisse son atelier, que la suivante ne doit pas reprendre.
+   */
+  async createLocalStory(
+    title: string,
+    parent: string | null,
+    createdAt = new Date()
+  ): Promise<CreatedCard> {
+    await this.ensureFolders();
+    const taken = [...(await this.indexBySourceId()).keys(), ...(await this.planIds())];
+    const id = nextLocalId(LOCAL_STORY_PREFIX, taken);
+    const filePath = path.join(this.folderPath('new'), cardFileName(id, title));
+    await fs.writeFile(filePath, renderLocalStoryCard({ id, title, parent, createdAt }), {
+      encoding: 'utf8',
+      flag: 'wx'
+    });
+    return { id, filePath };
+  }
+
+  /** Les dossiers d'atelier de `plans/`, nommés d'après l'identifiant de la story. */
+  private async planIds(): Promise<string[]> {
     try {
-      names = await fs.readdir(dir);
+      return await fs.readdir(this.plansPath());
     } catch (err) {
       if (isMissing(err)) {
         return [];
       }
       throw err;
-    }
-
-    const stories: StoryFile[] = [];
-    for (const name of names) {
-      if (!name.endsWith('.md')) {
-        continue;
-      }
-      const filePath = path.join(dir, name);
-      const story = await this.readStory(filePath, folder);
-      if (story) {
-        stories.push(story);
-      }
-    }
-    return stories.sort((a, b) => compareIds(a.frontmatter.source_id, b.frontmatter.source_id));
-  }
-
-  private async readStory(filePath: string, folder: StoryFolder): Promise<StoryFile | undefined> {
-    try {
-      const raw = await fs.readFile(filePath, 'utf8');
-      const parsed = matter(raw);
-      const data = parsed.data as Partial<StoryFrontmatter>;
-      // Sans identifiant de source, la fiche n'est pas exploitable par le flux.
-      if (data.source_id === undefined || data.source_id === null) {
-        return undefined;
-      }
-      const frontmatter = { ...data, source_id: String(data.source_id) };
-      return {
-        filePath,
-        folder,
-        frontmatter,
-        title: frontmatter.title ?? firstHeading(parsed.content) ?? path.basename(filePath, '.md')
-      };
-    } catch {
-      // Une fiche illisible ne doit pas casser le panneau : on l'ignore.
-      return undefined;
     }
   }
 
@@ -195,19 +239,77 @@ export class WorkDir {
   }
 }
 
+/** Une fiche lue sur disque, avant d'être rattachée à son dossier. */
+interface Card<T> {
+  filePath: string;
+  frontmatter: Partial<T> & { source_id: string };
+  title: string;
+}
+
+/** Les fiches markdown d'un dossier, triées par identifiant. Un dossier absent est vide. */
+async function readCards<T extends { title: string }>(dir: string): Promise<Array<Card<T>>> {
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch (err) {
+    if (isMissing(err)) {
+      return [];
+    }
+    throw err;
+  }
+
+  const cards: Array<Card<T>> = [];
+  for (const name of names) {
+    if (!name.endsWith('.md')) {
+      continue;
+    }
+    const card = await readCard<T>(path.join(dir, name));
+    if (card) {
+      cards.push(card);
+    }
+  }
+  return cards.sort((a, b) => compareIds(a.frontmatter.source_id, b.frontmatter.source_id));
+}
+
+async function readCard<T extends { title: string }>(
+  filePath: string
+): Promise<Card<T> | undefined> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = matter(raw);
+    const data = parsed.data as Partial<T> & { source_id?: unknown };
+    // Sans identifiant de source, la fiche n'est pas exploitable par le flux.
+    if (data.source_id === undefined || data.source_id === null) {
+      return undefined;
+    }
+    const frontmatter = { ...data, source_id: String(data.source_id) };
+    return {
+      filePath,
+      frontmatter,
+      title: frontmatter.title ?? firstHeading(parsed.content) ?? path.basename(filePath, '.md')
+    };
+  } catch {
+    // Une fiche illisible ne doit pas casser le panneau : on l'ignore.
+    return undefined;
+  }
+}
+
 function firstHeading(content: string): string | undefined {
   const match = /^#\s+(.+)$/m.exec(content);
   return match?.[1]?.trim();
 }
 
-/** Trie numériquement quand les deux identifiants sont des nombres, sinon alphabétiquement. */
+/**
+ * Trie numériquement quand les deux identifiants sont des nombres, sinon
+ * alphabétiquement, numéros compris dans l'ordre (`LOCAL-2` avant `LOCAL-10`).
+ */
 function compareIds(a: string, b: string): number {
   const na = Number(a);
   const nb = Number(b);
   if (!Number.isNaN(na) && !Number.isNaN(nb)) {
     return na - nb;
   }
-  return a.localeCompare(b);
+  return a.localeCompare(b, undefined, { numeric: true });
 }
 
 function isMissing(err: unknown): boolean {

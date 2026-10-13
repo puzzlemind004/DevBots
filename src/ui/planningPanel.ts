@@ -14,7 +14,7 @@ import type { Answer, PlanSection } from '../core/plan.js';
 import { PLAN_SECTIONS, PlanShapeError } from '../core/plan.js';
 import { PlanningError, PlanningSession } from '../core/planning.js';
 import { PlanStore } from '../core/planStore.js';
-import type { StoryFile } from '../core/workDir.js';
+import { WorkDir, type StoryFile } from '../core/workDir.js';
 import { readConfig } from '../util/config.js';
 
 export interface PlanningContext {
@@ -79,6 +79,7 @@ export class PlanningPanel {
     const config = readConfig(ctx.repoUri);
     const workRoot = vscode.Uri.joinPath(ctx.repoUri, config.workDir).fsPath;
     const store = new PlanStore(path.join(workRoot, 'plans'));
+    const feature = await new WorkDir(workRoot).findFeature(story.frontmatter.parent);
     const session = await PlanningSession.open(
       {
         store,
@@ -92,7 +93,8 @@ export class PlanningPanel {
       },
       story.filePath,
       storyId,
-      story.title
+      story.title,
+      feature?.filePath
     );
 
     const panel = vscode.window.createWebviewPanel(

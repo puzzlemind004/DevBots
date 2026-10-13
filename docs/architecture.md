@@ -15,6 +15,7 @@ src/
 │   ├── html.ts         HTML Azure DevOps → markdown
 │   ├── repoSlug.ts     Lecture des identifiants de dépôt GitHub
 │   ├── storyCard.ts    Fabrication des fiches markdown
+│   ├── localCards.ts   Fiches saisies à la main : stories et features
 │   ├── workDir.ts      Lecture et écriture de .work
 │   ├── claudeCli.ts    Vérification du CLI et appels claude -p
 │   ├── plan.ts         Schémas du plan, lecture défensive, contrôles de forme
@@ -28,6 +29,7 @@ src/
 ├── ui/                 Ce qui touche à l'interface VS Code
 │   ├── flowTree.ts     Le panneau latéral
 │   ├── importCommand.ts La commande d'import
+│   ├── localCardCommands.ts Nouvelle story, nouvelle feature
 │   └── planningPanel.ts L'onglet de l'atelier (webview)
 └── util/
     ├── config.ts       Paramètres et SecretStorage
@@ -65,8 +67,12 @@ puis feature, puis story, et une feuille est toujours une story.
 
 ## Lecture seule chez la source
 
-Aucun appel d'écriture n'existe dans les connecteurs. Les fiches issues du tri
-du pre-pr-check (phase 3) resteront donc locales, avec un identifiant `LOCAL-<n>`.
+Aucun appel d'écriture n'existe dans les connecteurs. Les fiches saisies à la
+main restent donc locales, avec un identifiant `LOCAL-<n>` pour une story et
+`LOCAL-F<n>` pour une feature ; celles issues du tri du pre-pr-check (phase 3)
+suivront la même numérotation. Le numéro suivant tient compte de toutes les
+fiches du flux et des ateliers de `plans/`, pour qu'une story supprimée ne
+lègue pas son atelier à la suivante.
 
 ## Contenu importé : une donnée, pas une instruction
 
