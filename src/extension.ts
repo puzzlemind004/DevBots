@@ -9,6 +9,8 @@
  * supervision et tri des problèmes, de Ready à « À valider ».
  * Phase 4 : ta revue (diff, worktree, application, retours), feu vert, merge
  * séquentiel dans la branche de la feature, nettoyage, passage dans Done.
+ * Phase 5 : resynchronisation avec la source et décision sur les stories
+ * « à revoir », niveau de notifications et badge, paquet `.vsix`.
  */
 
 import { promises as fs } from 'node:fs';
@@ -23,6 +25,7 @@ import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
 import { customizeTemplates } from './ui/templatesCommand.js';
 import { DevController } from './ui/devController.js';
+import { SourceSync } from './ui/resyncCommand.js';
 import {
   CONFIG_SECTION,
   deleteSecret,
@@ -57,13 +60,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const watcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(folder, `${config.workDir}/**/*.{md,json}`)
   );
-  watcher.onDidCreate(() => tree.refresh(), undefined, context.subscriptions);
-  watcher.onDidDelete(() => tree.refresh(), undefined, context.subscriptions);
-  watcher.onDidChange(() => tree.refresh(), undefined, context.subscriptions);
-  context.subscriptions.push(watcher);
-
   const dev = new DevController({ repoUri: folder.uri, log, refresh: () => tree.refresh() });
   context.subscriptions.push(dev, ...dev.register());
+  dev.setBadgeView(view);
+
+  // Le badge suit les fiches : une story marquée « à revoir » le fait bouger.
+  let indicatorsTimer: ReturnType<typeof setTimeout> | undefined;
+  const onWorkChanged = (): void => {
+    tree.refresh();
+    clearTimeout(indicatorsTimer);
+    indicatorsTimer = setTimeout(() => dev.updateIndicators(), 300);
+  };
+  watcher.onDidCreate(onWorkChanged, undefined, context.subscriptions);
+  watcher.onDidDelete(onWorkChanged, undefined, context.subscriptions);
+  watcher.onDidChange(onWorkChanged, undefined, context.subscriptions);
+  context.subscriptions.push(watcher, { dispose: () => clearTimeout(indicatorsTimer) });
+
+  const sync = new SourceSync({ repoUri: folder.uri, secrets: context.secrets, log, refresh: onWorkChanged });
+  context.subscriptions.push(sync, ...sync.register());
 
   // Un changement de dossier de travail recrée le WorkDir du panneau.
   context.subscriptions.push(

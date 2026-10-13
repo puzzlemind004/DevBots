@@ -9,8 +9,9 @@ Spécification complète : [Proposition — Extension VS Code Dev Flow](https://
 
 ## État
 
-Phases 1 (fondations), 2 (planification), 3 (dev et supervision) et 4 (review
-et merge) livrées.
+Les cinq phases de la proposition sont livrées : fondations, planification, dev
+et supervision, review et merge, finitions. Pour installer et utiliser
+l'extension en équipe : [Guide de l'équipe](docs/equipe.md).
 Ce qui marche aujourd'hui :
 
 - paramètres par dépôt, secrets dans le SecretStorage ;
@@ -49,10 +50,14 @@ Ce qui marche aujourd'hui :
 - feu vert : merge séquentiel dans la branche de la feature, intégration de la
   feature si elle a avancé, checks, conflit renvoyé à l'agent, suppression du
   worktree et de la branche, fiche dans Done (voir
-  [Review et merge](docs/review-et-merge.md)).
-
-La phase suivante (finitions : resynchronisation, paquet `.vsix`, doc
-d'équipe) est décrite dans la proposition.
+  [Review et merge](docs/review-et-merge.md)) ;
+- resynchronisation à la demande avec la source : une story planifiée dont la
+  révision a changé passe « à revoir », avec le diff et le choix entre garder
+  le plan et replanifier (voir
+  [Resynchronisation](docs/resynchronisation.md)) ;
+- badge des stories qui t'attendent sur l'icône DevBots, niveau de
+  notifications réglable ;
+- paquet `.vsix` pour la diffusion (`npm run package`).
 
 ## Démarrer
 
@@ -64,6 +69,10 @@ npm run watch   # puis F5 dans VS Code pour lancer l'extension
 
 `F5` ouvre une fenêtre VS Code avec l'extension chargée. Ouvre-y un dépôt qui
 contient (ou contiendra) un dossier `.work`.
+
+```bash
+npm run package # vérifications, build, puis devbots-<version>.vsix
+```
 
 ## Configuration
 
@@ -93,6 +102,8 @@ contient (ou contiendra) un dossier `.work`.
 | `devbots.review.serveCommand` | Lance l'application d'un worktree en revue, `{port}` compris |
 | `devbots.review.basePort` | Premier port des worktrees en revue, 4201 par défaut |
 | `devbots.claude.executable` | Commande du CLI Claude Code |
+| `devbots.sync.intervalMinutes` | Resynchronisation en arrière-plan, en minutes ; `0` (défaut) : à la demande seulement |
+| `devbots.notifications.level` | `all` (défaut), `actions` (ce qui attend un geste) ou `none` (le badge suffit) |
 
 ### Accès aux sources
 
@@ -117,6 +128,8 @@ ni dans `.work`.
 | DevBots : planifier la story | Ouvre l'atelier d'une story de New (aussi : l'ampoule sur la story) |
 | DevBots : supprimer la fiche | Clic droit sur une story ou une feature du panneau : la fiche part à la corbeille, après confirmation. Un ticket importé redevient proposé à l'import |
 | DevBots : rafraîchir le flux | Relit `.work` |
+| DevBots : resynchroniser avec la source | Relit chez la source les stories de New et Ready : fiches de New mises à jour, stories planifiées marquées « à revoir » si leur révision a changé (aussi : menu `…` du panneau) |
+| DevBots : voir les changements de la source | Story « à revoir » : diff entre la version planifiée et la source, puis garder le plan ou replanifier |
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
 | DevBots : effacer le jeton d'accès | Le retire |
 | DevBots : vérifier l'installation de Claude Code | Teste le CLI et sa version |
@@ -145,3 +158,5 @@ ni dans `.work`.
 - [Gabarits](docs/gabarits.md) — plan et CR, ceux du dépôt ou ceux par défaut
 - [Dev et supervision](docs/dev-et-supervision.md) — file d'attente, worktrees, agents, revue, tri
 - [Review et merge](docs/review-et-merge.md) — la carte « À valider », retours, feu vert, merge
+- [Resynchronisation](docs/resynchronisation.md) — stories changées chez la source, garder le plan ou replanifier
+- [Guide de l'équipe](docs/equipe.md) — installation du `.vsix`, configuration d'un dépôt, notifications, dépannage

@@ -77,6 +77,14 @@
           "markdownDescription": "Label qui marque une issue comme validée pour l'import, en plus de tes propres issues.",
           "scope": "resource"
         },
+        "devbots.sync.intervalMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "default": 0,
+          "markdownDescription": "Resynchronisation avec la source en arrière-plan, en minutes (5 au minimum). `0` : désactivée, la resynchronisation se lance à la demande depuis le panneau. Elle ne fait que lire : rien n'est écrit chez la source.",
+          "scope": "resource"
+        },
         "devbots.planning.skill": {
           "type": "string",
           "default": "",
@@ -209,6 +217,22 @@
           "default": "claude",
           "markdownDescription": "Commande du CLI Claude Code.",
           "scope": "window"
+        },
+        "devbots.notifications.level": {
+          "type": "string",
+          "enum": [
+            "all",
+            "actions",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Tout : revue attendue, blocages, merges, retours à l'agent, changements dans la source",
+            "Seulement ce qui attend un geste de ta part : revue, blocage, merge impossible ou incomplet, changement dans la source",
+            "Aucune : le badge de l'icône DevBots et la barre d'état suffisent"
+          ],
+          "default": "all",
+          "markdownDescription": "Notifications du flux. Le badge de l'icône DevBots compte toujours les stories qui t'attendent (à valider, bloquées, à revoir), quel que soit ce réglage.",
+          "scope": "window"
         }
       }
     },
@@ -256,6 +280,16 @@
         "command": "devbots.deleteCard",
         "title": "DevBots : supprimer la fiche",
         "icon": "$(trash)"
+      },
+      {
+        "command": "devbots.resync",
+        "title": "DevBots : resynchroniser avec la source",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "devbots.reviewSourceChange",
+        "title": "DevBots : voir les changements de la source",
+        "icon": "$(git-compare)"
       },
       {
         "command": "devbots.refresh",
@@ -383,12 +417,22 @@
           "group": "navigation@3"
         },
         {
+          "command": "devbots.resync",
+          "when": "view == devbots.flow",
+          "group": "1_create@2"
+        },
+        {
           "command": "devbots.newFeature",
           "when": "view == devbots.flow",
           "group": "1_create@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "devbots.reviewSourceChange",
+          "when": "view == devbots.flow && viewItem =~ /:changed/",
+          "group": "inline@0"
+        },
         {
           "command": "devbots.planStory",
           "when": "view == devbots.flow && viewItem =~ /story:new/",
@@ -539,7 +583,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run lint && npm run test",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies --skip-license --allow-missing-repository --no-rewrite-relative-links"
   },
   "devDependencies": {
     "@types/node": "^24.9.0",

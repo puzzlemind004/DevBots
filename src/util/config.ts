@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { DEFAULT_ALLOWED_COMMANDS } from '../core/devEnv.js';
 import type { SourceKind } from '../core/model.js';
+import type { NotificationLevel } from '../core/notifications.js';
 
 export const CONFIG_SECTION = 'devbots';
 
@@ -46,6 +47,9 @@ export interface DevBotsConfig {
   /** Lance l'application d'un worktree pour ta revue ; `{port}` reçoit son port. */
   reviewServeCommand: string;
   reviewBasePort: number;
+  /** Resynchronisation en arrière-plan, en minutes. 0 : à la demande seulement. */
+  syncIntervalMinutes: number;
+  notificationLevel: NotificationLevel;
 }
 
 export function readConfig(scope?: vscode.Uri): DevBotsConfig {
@@ -76,7 +80,9 @@ export function readConfig(scope?: vscode.Uri): DevBotsConfig {
     supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 3),
     mergeCheckCommands: cfg.get<string[]>('merge.checkCommands', []).map((c) => c.trim()).filter(Boolean),
     reviewServeCommand: cfg.get<string>('review.serveCommand', 'npx ng serve --port {port}').trim(),
-    reviewBasePort: cfg.get<number>('review.basePort', 4201)
+    reviewBasePort: cfg.get<number>('review.basePort', 4201),
+    syncIntervalMinutes: cfg.get<number>('sync.intervalMinutes', 0),
+    notificationLevel: cfg.get<NotificationLevel>('notifications.level', 'all')
   };
 }
 

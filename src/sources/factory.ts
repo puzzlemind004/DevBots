@@ -19,13 +19,18 @@ export type { RepoSlug } from '../core/repoSlug.js';
 /** Portée minimale : lecture des issues des dépôts publics et privés. */
 const GITHUB_SCOPES = ['repo'];
 
+/**
+ * @param interactive Faux pour une resynchronisation en arrière-plan : aucune
+ *   fenêtre de connexion ne s'ouvre, faute d'accès la source est refusée.
+ */
 export async function createSource(
   config: DevBotsConfig,
   secrets: vscode.SecretStorage,
-  repoRoot: string
+  repoRoot: string,
+  interactive = true
 ): Promise<TicketSource> {
   if (config.sourceKind === 'github') {
-    return createGitHubSource(config, secrets, repoRoot);
+    return createGitHubSource(config, secrets, repoRoot, interactive);
   }
   return createAzureSource(config, secrets);
 }
@@ -33,7 +38,8 @@ export async function createSource(
 async function createGitHubSource(
   config: DevBotsConfig,
   secrets: vscode.SecretStorage,
-  repoRoot: string
+  repoRoot: string,
+  interactive: boolean
 ): Promise<TicketSource> {
   const slug = config.githubRepository || (await detectGitHubRepo(repoRoot));
   if (!slug) {
@@ -56,7 +62,9 @@ async function createGitHubSource(
     });
     const active =
       session ??
-      (await vscode.authentication.getSession('github', GITHUB_SCOPES, { createIfNone: true }));
+      (interactive
+        ? await vscode.authentication.getSession('github', GITHUB_SCOPES, { createIfNone: true })
+        : undefined);
     if (!active) {
       throw new ConfigError(
         "Connexion GitHub refusée. Connecte-toi à GitHub dans VS Code, ou enregistre un jeton avec « DevBots : enregistrer un jeton d'accès »."

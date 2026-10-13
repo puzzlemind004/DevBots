@@ -23,6 +23,9 @@ const MAX_DEPTH = 4;
 /** Plafond de la liste des issues ouvertes : au-delà, la saisie d'un numéro reste possible. */
 export const MAX_LISTED_ISSUES = 1000;
 
+/** Lectures d'issues lancées ensemble par la resynchronisation. */
+const PARALLEL_READS = 8;
+
 export interface GitHubSourceOptions {
   owner: string;
   repo: string;
@@ -113,6 +116,25 @@ export class GitHubTicketSource implements TicketSource {
       );
     }
     return collected;
+  }
+
+  async fetchTickets(ids: string[], cancellation?: CancellationLike): Promise<Ticket[]> {
+    const numbers = [...new Set(ids.map(parseIssueNumber))];
+    const tickets: Ticket[] = [];
+    // Une lecture par issue : quelques-unes à la fois, pour ménager le quota de l'API.
+    for (let i = 0; i < numbers.length; i += PARALLEL_READS) {
+      if (cancellation?.isCancellationRequested) {
+        break;
+      }
+      const issues = await Promise.all(numbers.slice(i, i + PARALLEL_READS).map((n) => this.getIssue(n)));
+      for (const issue of issues) {
+        // Une issue qui n'est plus de confiance n'est pas relue : son contenu est écarté.
+        if (issue && isTrustedIssue(issue, this.options)) {
+          tickets.push(this.toTicket(issue, undefined, 'story'));
+        }
+      }
+    }
+    return tickets;
   }
 
   /** Parcourt l'issue puis ses sub-issues, en largeur de hiérarchie et en profondeur limitée. */

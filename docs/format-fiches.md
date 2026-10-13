@@ -179,16 +179,24 @@ la réécrit sur place, sans marquage « à revoir ».
 
 ## Resynchronisation
 
-À chaque import, une story déjà connue est comparée par sa révision.
+À chaque import, et à chaque resynchronisation, une story déjà connue est
+comparée par sa **révision** : tout changement compte, un commentaire GitHub
+compris, puisqu'il apporte souvent une précision.
 
 | Situation | Effet |
 | --- | --- |
-| Inconnue | Fiche écrite dans `new/` |
+| Inconnue | Fiche écrite dans `new/`, référence gardée dans `.work/sources/<id>.md` |
 | Connue, même révision | Rien |
-| Connue, encore dans `new/` | Fiche réécrite sur place |
-| Connue, déjà dans `ready/` ou `done/` | Marquée `needs_review: true`, **contenu intact** |
+| Connue, encore dans `new/`, révision nouvelle | Fiche réécrite sur place |
+| Connue, déjà dans `ready/` ou `done/`, révision nouvelle | Marquée `needs_review: true`, **contenu intact** |
 
 Le dernier cas est le plus important : une story déjà planifiée a un plan et des
 échanges attachés. L'extension ajoute `needs_review: true` et
-`source_rev_seen: <nouvelle révision>` au frontmatter, sans toucher au corps. Le
-panneau l'affiche « à revoir », et c'est toi qui tranches.
+`source_rev_seen: <nouvelle révision>` au frontmatter, sans toucher au corps, et
+range la version reçue dans `.work/sources/<id>.incoming.md`. Le panneau
+l'affiche « à revoir », et c'est toi qui tranches (voir
+[Resynchronisation](resynchronisation.md)).
+
+La référence ne sert qu'à montrer la différence. Une story importée avant que
+`.work/sources/` existe n'en a pas : elle s'écrit au premier passage où la
+révision n'a pas bougé ; d'ici là, le diff part de la fiche elle-même.

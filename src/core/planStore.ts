@@ -117,6 +117,27 @@ export class PlanStore {
     }
   }
 
+  /**
+   * Rouvre une planification validée : la story est revenue dans `new/`.
+   * La compréhension repart d'une session neuve, sur la fiche réécrite ; les
+   * versions du plan restent consultables, et la dernière reste en revue,
+   * toutes ses sections à relire.
+   */
+  async reopen(storyId: string, reason: string): Promise<void> {
+    const state = await this.load(storyId);
+    if (!state) {
+      return;
+    }
+    delete state.sessionId;
+    delete state.understanding;
+    state.phase = 'understanding';
+    state.answers = {};
+    state.reviewed = {};
+    state.resumes = 0;
+    await this.appendHistory(storyId, { who: 'devbots', kind: 'réouverture', text: reason });
+    await this.save(state);
+  }
+
   /** Les stories dont une planification est en cours, avec leur phase. */
   async listPhases(): Promise<Map<string, PlanningPhase>> {
     const phases = new Map<string, PlanningPhase>();

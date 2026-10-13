@@ -70,7 +70,11 @@ export interface StoryFrontmatter {
   dependencies?: string[];
   story_points?: number;
   priority?: number;
-  /** Posé par la resynchronisation quand la story a changé dans la source. */
+  /**
+   * Posé par la resynchronisation quand le contenu de la story a changé dans
+   * la source après sa planification. La version reçue attend dans
+   * `sources/<id>.incoming.md`.
+   */
   needs_review?: boolean;
   /** Révision vue dans la source au moment du marquage. */
   source_rev_seen?: string;
@@ -132,6 +136,13 @@ export interface TicketSource {
    * @param rootId Identifiant de work item (ADO) ou d'issue (GitHub).
    */
   fetchTree(rootId: string, token?: CancellationLike): Promise<Ticket[]>;
+  /**
+   * Relit des stories déjà importées, sans leur descendance : c'est la
+   * resynchronisation. Un ticket absent, ou écarté par le filtre d'auteur,
+   * manque simplement à la réponse. Le parent n'est donné que si la source le
+   * connaît sans parcourir l'arbre.
+   */
+  fetchTickets(ids: string[], token?: CancellationLike): Promise<Ticket[]>;
   /** Vérifie la connexion et les droits en lecture. */
   probe(): Promise<void>;
   /**

@@ -336,6 +336,7 @@ function reportResults(
   log: vscode.LogOutputChannel
 ): void {
   const created = results.filter((r) => r.outcome === 'created').length;
+  const updated = results.filter((r) => r.outcome === 'updated').length;
   const unchanged = results.filter((r) => r.outcome === 'unchanged').length;
   const needsReview = results.filter((r) => r.outcome === 'needsReview');
 
@@ -351,6 +352,9 @@ function reportResults(
   const parts: string[] = [];
   if (created > 0) {
     parts.push(`${created} fiche(s) écrite(s)`);
+  }
+  if (updated > 0) {
+    parts.push(`${updated} mise(s) à jour`);
   }
   if (featuresWritten > 0) {
     parts.push(`${featuresWritten} feature(s) écrite(s)`);
@@ -371,7 +375,7 @@ function reportResults(
     vscode.window.showWarningMessage(
       `Import terminé : ${summary}. Les stories ${needsReview
         .map((r) => r.sourceId)
-        .join(', ')} ont changé dans la source depuis leur planification.`
+        .join(', ')} ont changé dans la source depuis leur planification : « voir les changements » sur chacune.`
     );
   } else if (failures.length > 0) {
     vscode.window.showWarningMessage(`Import terminé : ${summary}. Détails dans le journal.`);
@@ -380,7 +384,12 @@ function reportResults(
   }
 }
 
-async function reportError(err: unknown, log: vscode.LogOutputChannel): Promise<void> {
+/** Une erreur de configuration propose d'ouvrir le paramètre en cause ; les autres, le journal. */
+export async function reportError(
+  err: unknown,
+  log: vscode.LogOutputChannel,
+  prefix = 'Import impossible'
+): Promise<void> {
   if (err instanceof ConfigError) {
     log.warn(err.message);
     const action = err.settingId ? 'Ouvrir les paramètres' : undefined;
@@ -395,7 +404,7 @@ async function reportError(err: unknown, log: vscode.LogOutputChannel): Promise<
   }
   const message = err instanceof Error ? err.message : String(err);
   log.error(message);
-  const chosen = await vscode.window.showErrorMessage(`Import impossible : ${message}`, 'Voir le journal');
+  const chosen = await vscode.window.showErrorMessage(`${prefix} : ${message}`, 'Voir le journal');
   if (chosen === 'Voir le journal') {
     log.show();
   }

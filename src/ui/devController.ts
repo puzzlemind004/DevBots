@@ -14,6 +14,7 @@ import { FlowStateStore, statusLabel, type StoryRun } from '../core/flowState.js
 import { Orchestrator, type DevSettings, type OrchestratorEvent } from '../core/orchestrator.js';
 import { safeId } from '../core/planStore.js';
 import { dependencyView, schedulable } from '../core/schedule.js';
+import { shouldNotify, waitingCount } from '../core/notifications.js';
 import { DEFAULT_SUPERVISION_FILE, SUPERVISION_FILE } from '../core/supervision.js';
 import { WorkDir, type StoryFile } from '../core/workDir.js';
 import { readConfig } from '../util/config.js';
@@ -37,6 +38,7 @@ export class DevController implements vscode.Disposable {
   private readonly serveTerminals = new Map<string, vscode.Terminal>();
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
+  private badgeView: vscode.TreeView<FlowNode> | undefined;
 
   constructor(private readonly ctx: DevContext) {
     this.workDir = this.createWorkDir();
@@ -127,6 +129,21 @@ export class DevController implements vscode.Disposable {
     if (story.folder !== 'ready') {
       vscode.window.showInformationMessage('Seules les stories de Ready partent en dev.');
       return;
+    }
+    if (story.frontmatter.needs_review === true) {
+      const review = 'Voir les changements';
+      const chosen = await vscode.window.showWarningMessage(
+        `${story.frontmatter.source_id} a changé dans la source depuis sa planification.`,
+        { modal: true, detail: 'Le plan a été écrit sur la version précédente de la story.' },
+        review,
+        'Lancer quand même'
+      );
+      if (chosen === review) {
+        await vscode.commands.executeCommand('devbots.reviewSourceChange', node ?? { kind: 'story', group: 'ready', story });
+      }
+      if (chosen !== 'Lancer quand même') {
+        return;
+      }
     }
     const config = readConfig(this.ctx.repoUri);
     const recommended = config.devModel || story.frontmatter.recommended_model || 'sonnet';
@@ -295,6 +312,7 @@ export class DevController implements vscode.Disposable {
     if (!run) {
       return;
     }
+    const changed = (await this.workDir.findStory(run.storyId))?.frontmatter.needs_review === true;
     const confirmed = await vscode.window.showWarningMessage(
       `Feu vert pour ${run.storyId} — ${run.title} ?`,
       {
@@ -302,7 +320,10 @@ export class DevController implements vscode.Disposable {
         detail: [
           `DevBots intègre ${run.baseBranch} si elle a avancé, puis merge ${run.branch} dans ${run.baseBranch}.`,
           'Le worktree et la branche de la story sont ensuite supprimés, et la fiche passe dans Done.',
-          'Tes retouches non commitées du worktree partent avec la story.'
+          'Tes retouches non commitées du worktree partent avec la story.',
+          ...(changed
+            ? ['', 'Attention : la story a changé dans la source depuis sa planification (« voir les changements »).']
+            : [])
         ].join('\n')
       },
       'Merger'
@@ -437,6 +458,13 @@ export class DevController implements vscode.Disposable {
   private onEvent(event: OrchestratorEvent): void {
     this.ctx.refresh();
     void this.updateStatusBar();
+    if (event.kind === 'changed') {
+      return;
+    }
+    const kind = event.kind === 'merged' && event.warning ? 'mergedWithWarning' : event.kind;
+    if (!shouldNotify(readConfig(this.ctx.repoUri).notificationLevel, kind)) {
+      return;
+    }
     if (event.kind === 'awaitingHuman') {
       void vscode.window
         .showInformationMessage(`${event.storyId} — ${event.title} attend ta revue.`, 'Voir le rapport', 'Voir le CR')
@@ -479,9 +507,21 @@ export class DevController implements vscode.Disposable {
     }
   }
 
+  /** Le panneau dont l'icône porte le badge des stories qui t'attendent. */
+  setBadgeView(view: vscode.TreeView<FlowNode>): void {
+    this.badgeView = view;
+    void this.updateStatusBar();
+  }
+
+  /** Barre d'état et badge, relus sur disque : à appeler quand `.work` change. */
+  updateIndicators(): void {
+    void this.updateStatusBar();
+  }
+
   private async updateStatusBar(): Promise<void> {
     const state = await new FlowStateStore(this.workDir.statePath()).read().catch(() => undefined);
     const runs = Object.values(state?.stories ?? {});
+    await this.updateBadge(runs);
     const active = this.orchestrator.activeIds.length;
     const queued = runs.filter((r) => r.status === 'queued').length;
     const waiting = runs.filter((r) => r.status === 'awaiting_human' || r.status === 'merging').length;
@@ -499,6 +539,20 @@ export class DevController implements vscode.Disposable {
     this.statusBar.text = parts.join(' · ');
     this.statusBar.tooltip = `DevBots : ${active} agent(s) actif(s) sur ${readConfig(this.ctx.repoUri).maxParallelAgents} au plus.`;
     this.statusBar.show();
+  }
+
+  private async updateBadge(runs: StoryRun[]): Promise<void> {
+    if (!this.badgeView) {
+      return;
+    }
+    const flagged = [...(await this.workDir.indexBySourceId().catch(() => new Map<string, StoryFile>())).values()]
+      .filter((s) => s.folder !== 'done' && s.frontmatter.needs_review === true)
+      .map((s) => s.frontmatter.source_id);
+    const count = waitingCount(runs, flagged);
+    this.badgeView.badge =
+      count > 0
+        ? { value: count, tooltip: `${count} story(s) t'attendent : à valider, bloquées ou à revoir` }
+        : undefined;
   }
 
   /**

@@ -118,6 +118,24 @@ describe('AzureDevOpsTicketSource.listCandidates', () => {
   });
 });
 
+describe('AzureDevOpsTicketSource.fetchTickets', () => {
+  it('relit les stories demandées, avec leur parent, sans leur descendance ni les absentes', async () => {
+    const api = new FakeWorkItems(
+      new Map([
+        [11, workItem(11, 'User Story', [rel('parent', 10)])],
+        [12, workItem(12, 'User Story', [rel('child', 13)])],
+        [13, workItem(13, 'Task')]
+      ])
+    );
+    const tickets = await sourceWith(api).fetchTickets(['11', '#12', '99', '11']);
+    expect(api.batches).toEqual([[11, 12, 99]]);
+    expect(tickets.map((t) => [t.sourceId, t.parentId]).sort()).toEqual([
+      ['11', '10'],
+      ['12', undefined]
+    ]);
+  });
+});
+
 describe('AzureDevOpsTicketSource.fetchTree', () => {
   it('ramène la feature parente d’une story choisie seule, sans ses autres stories', async () => {
     const api = new FakeWorkItems(

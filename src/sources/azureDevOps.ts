@@ -132,6 +132,33 @@ export class AzureDevOpsTicketSource implements TicketSource {
     return walk.out;
   }
 
+  async fetchTickets(ids: string[], cancellation?: CancellationLike): Promise<Ticket[]> {
+    const api = await this.getApi();
+    const numbers = [...new Set(ids.map(parseWorkItemId))];
+    const tickets: Ticket[] = [];
+    for (let i = 0; i < numbers.length; i += READ_BATCH) {
+      if (cancellation?.isCancellationRequested) {
+        break;
+      }
+      // `Omit` : un work item supprimé ou inaccessible manque à la réponse au
+      // lieu de faire échouer tout le lot.
+      const batch = await api.getWorkItems(
+        numbers.slice(i, i + READ_BATCH),
+        undefined,
+        undefined,
+        1 /* Relations */,
+        2 /* WorkItemErrorPolicy.Omit */
+      );
+      for (const item of batch ?? []) {
+        if (item?.id !== undefined) {
+          const parent = relationIds(item.relations, REL_PARENT)[0];
+          tickets.push(this.toTicket(item, parent === undefined ? undefined : String(parent)));
+        }
+      }
+    }
+    return tickets;
+  }
+
   private async getApi(): Promise<IWorkItemTrackingApi> {
     if (!this.api) {
       const auth = azdev.getPersonalAccessTokenHandler(this.options.token);

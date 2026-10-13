@@ -28,7 +28,9 @@ src/
 │   ├── git.ts          Branches, worktrees, commits, diff, intégration, fast-forward
 │   ├── devEnv.ts       Installation des dépendances, commandes autorisées
 │   ├── supervision.ts  supervision.json, schémas, tri, fiches du tri, rapport
-│   └── orchestrator.ts De Ready à Done : file, dev, revue, supervision, merge
+│   ├── orchestrator.ts De Ready à Done : file, dev, revue, supervision, merge
+│   ├── resync.ts       Resynchronisation : relecture, bilan, replanification
+│   └── notifications.ts Niveau de notifications, compte du badge
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
 │   ├── azureDevOps.ts  Work items ouverts, epic / feature → user stories
@@ -39,7 +41,8 @@ src/
 │   ├── localCardCommands.ts Nouvelle story, nouvelle feature
 │   ├── templatesCommand.ts Personnaliser les gabarits
 │   ├── planningPanel.ts L'onglet de l'atelier (webview)
-│   ├── devController.ts Dev, supervision et revue : commandes, journaux, barre d'état
+│   ├── devController.ts Dev, supervision et revue : commandes, journaux, barre d'état, badge
+│   ├── resyncCommand.ts Resynchronisation, minuteur, « voir les changements »
 │   └── storyDiff.ts    Le diff d'une story dans la vue native, contenu lu par git show
 └── util/
     ├── config.ts       Paramètres et SecretStorage
@@ -55,8 +58,10 @@ tests unitaires n'ont donc besoin d'aucun hôte VS Code. Les modules qui importe
 
 ## L'interface « source de tickets »
 
-`TicketSource` expose deux opérations : `probe()` pour vérifier l'accès, et
-`fetchTree(rootId)` pour récupérer un ticket et sa descendance. Une troisième,
+`TicketSource` expose trois opérations : `probe()` pour vérifier l'accès,
+`fetchTree(rootId)` pour récupérer un ticket et sa descendance, et
+`fetchTickets(ids)` pour relire des stories déjà importées, seules, à la
+resynchronisation (voir [Resynchronisation](resynchronisation.md)). Une quatrième,
 `listCandidates()`, propose les tickets ouverts en liste à cocher ; elle est
 optionnelle, et sans elle l'import demande un identifiant. Les deux
 implémentations produisent exactement les mêmes objets `Ticket`, si bien que le

@@ -225,6 +225,9 @@ function storyContext(node: StoryNode): string {
   if (node.story.frontmatter.web_url) {
     parts.push('linked');
   }
+  if (node.story.frontmatter.needs_review === true) {
+    parts.push('changed');
+  }
   return parts.join(':');
 }
 
@@ -261,8 +264,12 @@ function storyItem(node: StoryNode): vscode.TreeItem {
   if (run) {
     const [icon, color] = STATUS_ICONS[run.status];
     item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
-    item.description = `${badge}${statusLabel(run.status)} · ${run.model}${run.loops > 0 ? ` · boucle ${run.loops}` : ''}`;
+    item.description = `${badge}${statusLabel(run.status)} · ${run.model}${run.loops > 0 ? ` · boucle ${run.loops}` : ''}${needsReview ? ' · à revoir' : ''}`;
     item.tooltip = runTooltip(story, run);
+    if (needsReview) {
+      item.tooltip.appendMarkdown('\n\n$(warning) La story a changé dans la source depuis sa planification.');
+      item.tooltip.supportThemeIcons = true;
+    }
   } else if (needsReview) {
     item.description = 'à revoir';
     item.iconPath = new vscode.ThemeIcon(
@@ -270,7 +277,7 @@ function storyItem(node: StoryNode): vscode.TreeItem {
       new vscode.ThemeColor('list.warningForeground')
     );
     item.tooltip = new vscode.MarkdownString(
-      `**${story.title}**\n\nLa story a changé dans la source depuis son import. Révision vue : \`${story.frontmatter.source_rev_seen ?? '?'}\`.`
+      `**${story.title}**\n\nLa story a changé dans la source depuis sa planification (révision \`${story.frontmatter.source_rev_seen ?? '?'}\`). « Voir les changements » montre la différence et te laisse garder le plan ou replanifier.`
     );
   } else if (node.planning) {
     item.description = node.planning === 'understanding' ? 'en compréhension' : 'plan en revue';

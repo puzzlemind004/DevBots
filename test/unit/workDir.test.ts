@@ -76,7 +76,7 @@ describe('WorkDir', () => {
       [ticket({ revision: 'rev-2', title: 'Titre corrigé' })],
       'github'
     );
-    expect(results[0]?.outcome).toBe('created');
+    expect(results[0]?.outcome).toBe('updated');
     const stories = await workDir.listStories('new');
     // La fiche est réécrite sous son nom d'origine : pas de doublon.
     expect(stories).toHaveLength(1);
@@ -92,7 +92,7 @@ describe('WorkDir', () => {
     await fs.writeFile(readyPath, `${original}\n## Plan validé\n\n1. Écrire le validateur\n`, 'utf8');
     await fs.rm(newPath);
 
-    const results = await workDir.importTickets([ticket({ revision: 'rev-2' })], 'github');
+    const results = await workDir.importTickets([ticket({ revision: 'rev-2', description: 'Règle changée.' })], 'github');
     expect(results[0]?.outcome).toBe('needsReview');
 
     const parsed = matter(await fs.readFile(readyPath, 'utf8'));
