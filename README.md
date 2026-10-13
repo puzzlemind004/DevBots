@@ -14,13 +14,14 @@ Phases 1 (fondations) et 2 (planification) livrées. Ce qui marche aujourd'hui :
 - paramètres par dépôt, secrets dans le SecretStorage ;
 - connecteur GitHub : une issue parente et ses sub-issues deviennent des fiches ;
 - choix dans une liste à cocher : issues GitHub ouvertes, ou epics, features et
-  stories Azure DevOps ouverts ;
+  stories Azure DevOps ouverts, sans ceux que `.work` connaît déjà ;
 - connecteur Azure DevOps : un epic, une feature ou une story, et sa descendance ;
 - les tickets qui regroupent des stories deviennent des fiches de
   `.work/features` ;
 - import vers `.work/new`, avec marquage « à revoir » au lieu d'un écrasement ;
 - saisie à la main de features (`LOCAL-F<n>`) et de stories (`LOCAL-<n>`),
   en fiches pré-remplies à compléter dans l'éditeur ;
+- suppression d'une story ou d'une feature depuis le panneau (corbeille) ;
 - panneau latéral (New, Ready, Done), les stories de New rangées sous leur feature ;
 - vérification du CLI Claude Code au démarrage ;
 - atelier de planification : compréhension et questions, plan structuré revu
@@ -75,10 +76,11 @@ ni dans `.work`.
 
 | Commande | Effet |
 | --- | --- |
-| DevBots : importer des tickets | GitHub : liste à cocher des issues ouvertes (le crayon garde la saisie d'un numéro). Azure DevOps : liste à cocher des epics, features et stories ouverts. Remplit `.work/new` |
+| DevBots : importer des tickets | GitHub : liste à cocher des issues ouvertes (le crayon garde la saisie d'un numéro). Azure DevOps : liste à cocher des epics, features et stories ouverts. Les tickets déjà importés n'y figurent plus, un parent non plus quand toutes ses stories le sont ; le crayon les relit. Remplit `.work/new` |
 | DevBots : nouvelle story | Demande la feature (ou en crée une) et le titre, écrit une fiche `LOCAL-<n>` dans `.work/new` et l'ouvre (aussi : le `+` du panneau, de New ou d'une feature) |
 | DevBots : nouvelle feature | Écrit une fiche `LOCAL-F<n>` dans `.work/features` et l'ouvre |
 | DevBots : planifier la story | Ouvre l'atelier d'une story de New (aussi : l'ampoule sur la story) |
+| DevBots : supprimer la fiche | Clic droit sur une story ou une feature du panneau : la fiche part à la corbeille, après confirmation. Un ticket importé redevient proposé à l'import |
 | DevBots : rafraîchir le flux | Relit `.work` |
 | DevBots : enregistrer un jeton d'accès | Stocke un jeton dans le SecretStorage |
 | DevBots : effacer le jeton d'accès | Le retire |

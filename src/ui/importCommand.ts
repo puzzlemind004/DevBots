@@ -2,8 +2,8 @@
  * La commande d'import : remplit `.work/new` depuis la source.
  *
  * Les issues ouvertes du dépôt GitHub, ou les epics, features et stories
- * ouverts du projet Azure DevOps, sont proposés en liste à cocher ; à la
- * demande, un identifiant suffit. Les tickets qui regroupent des stories
+ * ouverts du projet Azure DevOps, sont proposés en liste à cocher, sans ceux
+ * que `.work` connaît déjà ; à la demande, un identifiant suffit. Les tickets qui regroupent des stories
  * deviennent des fiches de `.work/features`. Rien n'est écrit dans la source.
  */
 
@@ -15,9 +15,10 @@ import type {
   TicketCandidate,
   TicketSource
 } from '../core/model.js';
-import type { ImportResult } from '../core/workDir.js';
+import type { FeatureFile, ImportResult, StoryFile } from '../core/workDir.js';
 import { WorkDir } from '../core/workDir.js';
 import { mergeTrees, storyGroups } from '../core/mergeTrees.js';
+import { alreadyImported, type KnownCard } from '../core/candidates.js';
 import { ConfigError, createSource } from '../sources/factory.js';
 import { readConfig, sourceLabel, type DevBotsConfig } from '../util/config.js';
 
@@ -184,10 +185,12 @@ async function pickCandidates(
   quickPick.show();
 
   try {
-    const [listing, known] = await Promise.all([list(loading.token), knownLocations(workDir)]);
+    const [listing, known] = await Promise.all([list(loading.token), knownCards(workDir)]);
     if (!hidden) {
-      quickPick.items = buildItems(listing.candidates, known);
-      quickPick.placeholder = placeholderFor(listing, config);
+      const imported = alreadyImported(listing.candidates, known.stories, known.features);
+      const offered = listing.candidates.filter((c) => !imported.has(c.sourceId));
+      quickPick.items = buildItems(offered, known.locations);
+      quickPick.placeholder = placeholderFor(listing, offered.length, imported.size, config);
       quickPick.busy = false;
     }
   } catch (err) {
@@ -204,16 +207,28 @@ async function pickCandidates(
   return picked;
 }
 
-/** Où chaque ticket déjà importé se trouve : un dossier du flux, ou `features`. */
-async function knownLocations(workDir: WorkDir): Promise<Map<string, string>> {
-  const known = new Map<string, string>();
-  for (const feature of await workDir.listFeatures()) {
-    known.set(feature.frontmatter.source_id, 'features');
+interface KnownCards {
+  stories: KnownCard[];
+  features: KnownCard[];
+  /** Où chaque ticket déjà importé se trouve : un dossier du flux, ou `features`. */
+  locations: Map<string, string>;
+}
+
+async function knownCards(workDir: WorkDir): Promise<KnownCards> {
+  const features = await workDir.listFeatures();
+  const stories = [...(await workDir.indexBySourceId()).values()];
+  const toKnown = (card: FeatureFile | StoryFile): KnownCard => ({
+    sourceId: card.frontmatter.source_id,
+    parent: card.frontmatter.parent
+  });
+  const locations = new Map<string, string>();
+  for (const feature of features) {
+    locations.set(feature.frontmatter.source_id, 'features');
   }
-  for (const [id, story] of await workDir.indexBySourceId()) {
-    known.set(id, story.folder);
+  for (const story of stories) {
+    locations.set(story.frontmatter.source_id, story.folder);
   }
-  return known;
+  return { stories: stories.map(toKnown), features: features.map(toKnown), locations };
 }
 
 /**
@@ -274,8 +289,17 @@ function toItem(
   };
 }
 
-function placeholderFor(listing: CandidateListing, config: DevBotsConfig): string {
+function placeholderFor(
+  listing: CandidateListing,
+  offeredCount: number,
+  importedCount: number,
+  config: DevBotsConfig
+): string {
   const notes: string[] = [];
+  if (importedCount > 0) {
+    // Le crayon reste le moyen de relire un ticket déjà importé.
+    notes.push(`${importedCount} déjà importé(s), masqué(s) : le crayon les relit`);
+  }
   if (listing.hiddenCount > 0) {
     notes.push(
       `${listing.hiddenCount} masquée(s) par le filtre d'auteur (label « ${config.githubTrustedLabel} » pour les inclure)`
@@ -286,13 +310,15 @@ function placeholderFor(listing: CandidateListing, config: DevBotsConfig): strin
   }
   const github = config.sourceKind === 'github';
   const base =
-    listing.candidates.length > 0
+    offeredCount > 0
       ? github
         ? 'Coche les issues à importer. Une issue parente importe ses sub-issues.'
         : 'Coche les work items à importer. Un epic ou une feature importe ses stories ; une story seule vient avec sa feature.'
-      : github
-        ? 'Aucune issue ouverte importable. Le crayon permet de saisir un numéro.'
-        : 'Aucun work item ouvert. Le crayon permet de saisir un ID.';
+      : importedCount > 0
+        ? 'Tout est déjà importé.'
+        : github
+          ? 'Aucune issue ouverte importable. Le crayon permet de saisir un numéro.'
+          : 'Aucun work item ouvert. Le crayon permet de saisir un ID.';
   return notes.length > 0 ? `${base} — ${notes.join(' ; ')}` : base;
 }
 

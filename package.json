@@ -160,6 +160,11 @@
         "icon": "$(layers)"
       },
       {
+        "command": "devbots.deleteCard",
+        "title": "DevBots : supprimer la fiche",
+        "icon": "$(trash)"
+      },
+      {
         "command": "devbots.refresh",
         "title": "DevBots : rafraîchir le flux",
         "icon": "$(refresh)"
@@ -226,6 +231,11 @@
           "group": "inline@2"
         },
         {
+          "command": "devbots.deleteCard",
+          "when": "view == devbots.flow && viewItem =~ /^(story|feature)/",
+          "group": "9_delete@1"
+        },
+        {
           "command": "devbots.newStory",
           "when": "view == devbots.flow && viewItem =~ /^feature/",
           "group": "inline@1"
@@ -248,6 +258,10 @@
         },
         {
           "command": "devbots.openInSource",
+          "when": "false"
+        },
+        {
+          "command": "devbots.deleteCard",
           "when": "false"
         }
       ]

@@ -2,8 +2,8 @@
  * Point d'entrée de l'extension DevBots.
  *
  * Phase 1 : paramètres, connecteurs de tickets, import vers `.work/new`, saisie
- * à la main de features et de stories, panneau latéral en lecture, vérification
- * du CLI Claude Code.
+ * à la main de features et de stories, suppression d'une fiche, panneau latéral,
+ * vérification du CLI Claude Code.
  * Phase 2 : atelier de planification, de New à Ready.
  */
 
@@ -14,6 +14,7 @@ import { checkClaude } from './core/claudeCli.js';
 import { isIncomplete } from './core/localCards.js';
 import { FlowTreeProvider, type FlowNode } from './ui/flowTree.js';
 import { runImport } from './ui/importCommand.js';
+import { deleteCard } from './ui/deleteCommand.js';
 import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
 import {
@@ -80,6 +81,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     vscode.commands.registerCommand('devbots.newStory', (node?: FlowNode) =>
       newStory({ repoUri: folder.uri, log, onCreated: () => tree.refresh() }, node)
+    ),
+    vscode.commands.registerCommand('devbots.deleteCard', (node?: FlowNode) =>
+      deleteCard({ log, onDeleted: () => tree.refresh() }, node)
     ),
     vscode.commands.registerCommand('devbots.refresh', () => tree.refresh()),
     vscode.commands.registerCommand('devbots.planStory', async (node?: FlowNode) => {

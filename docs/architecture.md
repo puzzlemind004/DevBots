@@ -76,6 +76,12 @@ couvrir tous les processus, et exclut les états `Closed`, `Done` et `Removed`.
 Un processus personnalisé aux états terminaux renommés laissera passer les
 siens.
 
+La liste à cocher écarte ce que `.work` connaît déjà (`alreadyImported` dans
+`core/candidates.ts`) : une story dont la fiche existe, et un parent dont
+chaque enfant a sa fiche, d'après le nombre d'enfants donné par la source. Un
+parent à qui il manque une story reste proposé ; le crayon relit un ticket
+masqué, pour une resynchronisation.
+
 ## Lecture seule chez la source
 
 Aucun appel d'écriture n'existe dans les connecteurs. Les fiches saisies à la
