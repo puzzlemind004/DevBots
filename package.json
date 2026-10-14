@@ -254,6 +254,7 @@
         },
         {
           "id": "devbots.usage",
+          "type": "webview",
           "name": "Usage Claude",
           "icon": "resources/devbots.svg",
           "size": 1

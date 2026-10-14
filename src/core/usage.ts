@@ -107,12 +107,6 @@ export function windowView(window: UsageWindow, now = new Date()): WindowView {
   };
 }
 
-/** Une jauge en texte : `██████░░░░`. */
-export function usageBar(percent: number, width = 10): string {
-  const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
-  return '█'.repeat(filled) + '░'.repeat(width - filled);
-}
-
 /** « il y a 3 min », « il y a 2 h ». */
 export function ageLabel(at: string, now = new Date()): string {
   const ms = now.getTime() - new Date(at).getTime();

@@ -4,7 +4,6 @@ import {
   mergeSnapshots,
   parseRateLimitLine,
   probeArgs,
-  usageBar,
   windowView
 } from '../../src/core/usage.js';
 
@@ -90,9 +89,7 @@ describe('affichage', () => {
     expect(view.resetIn).toBe('dans 3 j 2 h');
   });
 
-  it('dessine la jauge et l’âge du relevé', () => {
-    expect(usageBar(46)).toBe('█████░░░░░');
-    expect(usageBar(130)).toBe('██████████');
+  it('donne l’âge du relevé', () => {
     expect(ageLabel('2026-10-14T09:57:00Z', NOW)).toBe('il y a 3 min');
     expect(ageLabel('2026-10-14T09:59:30Z', NOW)).toBe("à l'instant");
   });
