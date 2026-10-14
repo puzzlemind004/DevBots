@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { createClaudeStreamRunner } from '../core/claudeCli.js';
-import { FlowStateStore, statusLabel, type StoryRun } from '../core/flowState.js';
+import { FlowStateStore, RUNNING_STATUSES, statusLabel, type StoryRun } from '../core/flowState.js';
 import { Orchestrator, type DevSettings, type OrchestratorEvent } from '../core/orchestrator.js';
 import { safeId } from '../core/planStore.js';
 import { dependencyView, schedulable } from '../core/schedule.js';
@@ -36,6 +36,8 @@ export class DevController implements vscode.Disposable {
   private readonly journals = new Map<string, vscode.OutputChannel>();
   /** Les terminaux où tourne l'application d'un worktree en revue. */
   private readonly serveTerminals = new Map<string, vscode.Terminal>();
+  /** Les discussions que DevBots ferme lui-même avant une relance : leur fermeture ne propose rien. */
+  private readonly closingAgentTerminals = new Set<vscode.Terminal>();
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
   private badgeView: vscode.TreeView<FlowNode> | undefined;
@@ -53,6 +55,7 @@ export class DevController implements vscode.Disposable {
             this.serveTerminals.delete(id);
           }
         }
+        void this.onAgentTerminalClosed(terminal);
       })
     );
   }
@@ -101,6 +104,7 @@ export class DevController implements vscode.Disposable {
       vscode.commands.registerCommand('devbots.sendFeedback', (node?: FlowNode) => this.sendFeedback(node)),
       vscode.commands.registerCommand('devbots.showDiff', (node?: FlowNode) => this.showDiff(node)),
       vscode.commands.registerCommand('devbots.openWorktree', (node?: FlowNode) => this.openWorktree(node)),
+      vscode.commands.registerCommand('devbots.openAgentSession', (node?: FlowNode) => this.openAgentSession(node)),
       vscode.commands.registerCommand('devbots.serveApp', (node?: FlowNode) => this.serveApp(node)),
       vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitContentProvider())
     ];
@@ -163,7 +167,7 @@ export class DevController implements vscode.Disposable {
 
   private async retryDev(node?: FlowNode): Promise<void> {
     const run = await this.runFor(node, 'Quelle story relancer ?', (r) => r.status === 'blocked');
-    if (!run) {
+    if (!run || !(await this.closeAgentDiscussion(run.storyId))) {
       return;
     }
     const model = await this.pickModel(run.model, `Modèle de l'agent pour ${run.storyId}`);
@@ -340,14 +344,28 @@ export class DevController implements vscode.Disposable {
   }
 
   private async sendFeedback(node?: FlowNode): Promise<void> {
-    const run = await this.awaitingReview(node, 'Retours sur quelle story ?');
+    const run = await this.runFor(node, 'Écrire à l’agent de quelle story ?', (r) =>
+      ['awaiting_human', 'blocked'].includes(r.status)
+    );
     if (!run) {
       return;
     }
+    if (run.status !== 'awaiting_human' && run.status !== 'blocked') {
+      vscode.window.showInformationMessage(`${run.storyId} n'attend ni ta revue ni ta réponse (${statusLabel(run.status)}).`);
+      return;
+    }
+    if (!(await this.closeAgentDiscussion(run.storyId))) {
+      return;
+    }
+    const blocked = run.status === 'blocked';
     const feedback = await vscode.window.showInputBox({
-      title: `Retours pour ${run.storyId} — ${run.title}`,
-      prompt: "Tes remarques partent à l'agent, dans sa session. La story repasse en dev, puis par la revue du CR et la supervision.",
-      placeHolder: 'Par exemple : le message d’erreur doit citer le champ fautif.',
+      title: `${blocked ? 'Réponse' : 'Retours'} pour ${run.storyId} — ${run.title}`,
+      prompt: blocked
+        ? `Bloquée : ${run.reason ?? 'sans raison donnée'} — Ta réponse part à l'agent, dans sa session, et la story reprend.`
+        : "Tes remarques partent à l'agent, dans sa session. La story repasse en dev, puis par la revue du CR et la supervision.",
+      placeHolder: blocked
+        ? 'Par exemple : j’ai installé les dépendances, relance les tests.'
+        : 'Par exemple : le message d’erreur doit citer le champ fautif.',
       ignoreFocusOut: true,
       validateInput: (value) => (value.trim() ? undefined : 'Écris au moins une remarque.')
     });
@@ -367,6 +385,53 @@ export class DevController implements vscode.Disposable {
     }
   }
 
+  /**
+   * Reprend la session de l'agent de dev dans Claude Code, avec toute sa
+   * conversation : `claude --resume` dans un terminal ouvert sur le worktree,
+   * en onglet d’éditeur. Tu y travailles sous tes propres permissions. La
+   * story ne bouge pas : « Relancer » ou tes retours la font repartir dans
+   * cette même session, votre échange compris.
+   *
+   * Le panneau de l'extension Claude Code ne retrouve pas ces sessions : nées
+   * de `claude -p` dans le worktree, elles n'apparaissent pas dans sa liste,
+   * et il en ouvre une neuve à la racine de l'espace de travail.
+   */
+  private async openAgentSession(node?: FlowNode): Promise<void> {
+    const run = await this.runFor(node, 'Discuter avec quel agent ?', (r) =>
+      ['blocked', 'awaiting_human'].includes(r.status) && Boolean(r.devSessionId)
+    );
+    if (!run) {
+      return;
+    }
+    if (RUNNING_STATUSES.includes(run.status) || run.status === 'queued') {
+      vscode.window.showInformationMessage(`L'agent de ${run.storyId} travaille : attends qu'il s'arrête, ou arrête-le.`);
+      return;
+    }
+    if (!run.devSessionId || !run.worktree || !(await isDirectory(run.worktree))) {
+      vscode.window.showInformationMessage(`L'agent de ${run.storyId} n'a pas de session à reprendre.`);
+      return;
+    }
+    const open = this.agentTerminal(run.storyId);
+    if (open) {
+      open.show();
+      return;
+    }
+    const exe = readConfig(this.ctx.repoUri).claudeExecutable;
+    // En onglet : le fermer n'arrête que ce Claude-là, la session reste sur disque et 💬 la reprend.
+    const terminal = vscode.window.createTerminal({
+      name: agentTerminalName(run.storyId),
+      cwd: run.worktree,
+      location: { viewColumn: vscode.ViewColumn.Active }
+    });
+    terminal.show();
+    terminal.sendText(`${/\s/.test(exe) ? `"${exe}"` : exe} --resume ${run.devSessionId}`);
+    vscode.window.showInformationMessage(
+      run.status === 'blocked'
+        ? `DevBots ne lit pas cet échange : la story reste bloquée. Ferme le terminal une fois fini, il te proposera de relancer ${run.storyId} dans cette même session, votre échange compris.`
+        : `Ce que l'agent change pendant l'échange part avec la story à ton feu vert. Pour refaire passer revue et supervision, écris-lui depuis le clic droit.`
+    );
+  }
+
   private async openWorktree(node?: FlowNode): Promise<void> {
     const run = await this.runFor(node, 'Worktree de quelle story ?', (r) => r.status !== 'done' && Boolean(r.worktree));
     if (!run) {
@@ -380,6 +445,8 @@ export class DevController implements vscode.Disposable {
     const choice = await vscode.window.showQuickPick(
       [
         { label: '$(empty-window) Dans une nouvelle fenêtre', value: 'window' as const },
+        { label: '$(terminal) Dans un terminal', detail: run.worktree, value: 'terminal' as const },
+        { label: '$(folder) Dans l’explorateur de fichiers', value: 'reveal' as const },
         {
           label: "$(root-folder) Ajouté à l'espace de travail",
           detail: "Une fenêtre à un seul dossier devient un espace de travail multi-racine : VS Code recharge les extensions.",
@@ -390,6 +457,10 @@ export class DevController implements vscode.Disposable {
     );
     if (choice?.value === 'window') {
       await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
+    } else if (choice?.value === 'terminal') {
+      vscode.window.createTerminal({ name: `DevBots · ${run.storyId}`, cwd: run.worktree }).show();
+    } else if (choice?.value === 'reveal') {
+      await vscode.commands.executeCommand('revealFileInOS', uri);
     } else if (choice?.value === 'workspace') {
       if (this.workspaceFolderIndex(run.worktree) < 0) {
         const count = vscode.workspace.workspaceFolders?.length ?? 0;
@@ -495,10 +566,14 @@ export class DevController implements vscode.Disposable {
       });
     } else if (event.kind === 'blocked') {
       void vscode.window
-        .showWarningMessage(`${event.storyId} bloquée : ${event.reason}`, 'Voir le journal', 'Relancer')
+        .showWarningMessage(`${event.storyId} bloquée : ${event.reason}`, 'Discuter', 'Répondre', 'Voir le journal', 'Relancer')
         .then((chosen) => {
           const node = this.fakeNode(event.storyId);
-          if (chosen === 'Voir le journal') {
+          if (chosen === 'Répondre') {
+            void this.sendFeedback(node);
+          } else if (chosen === 'Discuter') {
+            void this.openAgentSession(node);
+          } else if (chosen === 'Voir le journal') {
             void this.showJournal(node);
           } else if (chosen === 'Relancer') {
             void this.retryDev(node);
@@ -681,6 +756,58 @@ export class DevController implements vscode.Disposable {
   }
 
   /** Un nœud minimal pour rejouer une commande depuis une notification. */
+  private agentTerminal(storyId: string): vscode.Terminal | undefined {
+    return vscode.window.terminals.find((t) => t.name === agentTerminalName(storyId));
+  }
+
+  /**
+   * Fin d'une discussion avec l'agent : DevBots n'a rien vu de l'échange, et
+   * une story bloquée le reste tant qu'on ne la relance pas. On le propose.
+   */
+  private async onAgentTerminalClosed(terminal: vscode.Terminal): Promise<void> {
+    if (this.closingAgentTerminals.delete(terminal)) {
+      return;
+    }
+    const storyId = storyIdOfAgentTerminal(terminal.name);
+    if (!storyId) {
+      return;
+    }
+    const state = await new FlowStateStore(this.workDir.statePath()).read().catch(() => undefined);
+    if (state?.stories[storyId]?.status !== 'blocked') {
+      return;
+    }
+    const chosen = await vscode.window.showInformationMessage(
+      `Discussion avec l'agent de ${storyId} fermée. La story est toujours bloquée : la relancer pour que l'agent reprenne, votre échange compris ?`,
+      'Relancer'
+    );
+    if (chosen === 'Relancer') {
+      await this.retryDev(this.fakeNode(storyId));
+    }
+  }
+
+  /**
+   * Avant une relance ou une réponse : deux Claude sur la même session se
+   * marcheraient dessus. Rend faux si la discussion reste ouverte.
+   */
+  private async closeAgentDiscussion(storyId: string): Promise<boolean> {
+    const terminal = this.agentTerminal(storyId);
+    if (!terminal) {
+      return true;
+    }
+    const close = 'Fermer la discussion et continuer';
+    const chosen = await vscode.window.showWarningMessage(
+      `La discussion avec l'agent de ${storyId} est encore ouverte dans un terminal, sur la même session. Elle doit être fermée avant que l'agent reparte.`,
+      { modal: true },
+      close
+    );
+    if (chosen !== close) {
+      return false;
+    }
+    this.closingAgentTerminals.add(terminal);
+    terminal.dispose();
+    return true;
+  }
+
   private fakeNode(storyId: string): StoryNode {
     return {
       kind: 'story',
@@ -688,6 +815,16 @@ export class DevController implements vscode.Disposable {
       story: { filePath: '', folder: 'ready', title: storyId, frontmatter: { source_id: storyId } }
     };
   }
+}
+
+const AGENT_TERMINAL_PREFIX = 'Claude · ';
+
+function agentTerminalName(storyId: string): string {
+  return `${AGENT_TERMINAL_PREFIX}${storyId}`;
+}
+
+function storyIdOfAgentTerminal(name: string): string | undefined {
+  return name.startsWith(AGENT_TERMINAL_PREFIX) ? name.slice(AGENT_TERMINAL_PREFIX.length) : undefined;
 }
 
 async function isDirectory(p: string): Promise<boolean> {

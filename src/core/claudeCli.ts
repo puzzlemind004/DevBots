@@ -132,6 +132,8 @@ export type StreamEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; detail: string }
   | { kind: 'toolError'; detail: string }
+  /** Sortie structurée refusée par le schéma : Claude la corrige et la renvoie, sans y être invité. */
+  | { kind: 'schemaRetry'; detail: string }
   | { kind: 'result'; ok: boolean; detail: string };
 
 export class ClaudeError extends Error {
@@ -342,7 +344,7 @@ export function parseStreamLine(line: string): StreamEvent[] {
     case 'user':
       return contentOf(event).flatMap((block): StreamEvent[] =>
         block.type === 'tool_result' && block.is_error === true
-          ? [{ kind: 'toolError', detail: truncate(resultText(block.content), 300) }]
+          ? [toolErrorEvent(truncate(resultText(block.content), 300))]
           : []
       );
     case 'result': {
@@ -369,9 +371,19 @@ export function formatStreamEvent(event: StreamEvent): string {
       return `→ ${event.name}${event.detail ? ` : ${event.detail}` : ''}`;
     case 'toolError':
       return `✗ ${event.detail}`;
+    case 'schemaRetry':
+      return `↻ Sortie hors schéma, Claude la corrige : ${event.detail}`;
     case 'result':
       return `${event.ok ? 'Terminé' : 'Échec'} — ${event.detail}`;
   }
+}
+
+/** Le CLI renvoie lui-même à Claude une sortie structurée invalide : ce n'est pas un échec. */
+function toolErrorEvent(detail: string): StreamEvent {
+  const schema = /^Output does not match required schema:\s*/.exec(detail);
+  return schema
+    ? { kind: 'schemaRetry', detail: detail.slice(schema[0].length) }
+    : { kind: 'toolError', detail };
 }
 
 type ContentBlock = Record<string, unknown> & { type?: unknown };

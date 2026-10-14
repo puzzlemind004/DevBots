@@ -620,10 +620,37 @@ describe('Orchestrator', () => {
       expect(await fs.readdir(path.join(work, 'new'))).toEqual(['LOCAL-1-extraire-la-constante.md']);
     });
 
-    it("n'accepte feu vert et retours que sur une story à valider", async () => {
+    it("transmet ta réponse à un agent bloqué, dans sa session", async () => {
+      await addReady('42', ['src/email.ts']);
+      claude.dev.push(async () => ({
+        status: 'blocked',
+        summary: '',
+        build: 'not_run',
+        tests: 'not_run',
+        tests_detail: '',
+        lint: 'not_run',
+        blocked_reason: 'Quel format de date ?'
+      }));
+      await orchestrator.enqueue('42', 'sonnet');
+      expect(await settle('42', 'blocked')).toBe('blocked');
+
+      claude.dev.push(devWrites('src/email.ts'));
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+      await orchestrator.sendFeedback('42', 'ISO 8601.');
+      expect(await settle('42')).toBe('awaiting_human');
+
+      const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
+      expect(dev.resume).toBe('session-1');
+      expect(dev.prompt).toContain('Réponse humaine à ton blocage');
+      expect(dev.prompt).toContain('Quel format de date ?');
+      expect(dev.prompt).toContain('ISO 8601.');
+    });
+
+    it("n'accepte feu vert et retours que sur une story à valider ou bloquée", async () => {
       await addReady('42', ['src/email.ts']);
       await expect(orchestrator.approve('42')).rejects.toThrow("n'attend pas ton feu vert");
-      await expect(orchestrator.sendFeedback('42', 'x')).rejects.toThrow("n'attend pas ta revue");
+      await expect(orchestrator.sendFeedback('42', 'x')).rejects.toThrow("n'attend ni ta revue ni ta réponse");
     });
 
     it('donne à chaque worktree un port stable, sans doublon', async () => {

@@ -378,6 +378,17 @@ export interface PlanContext {
   declaredDependencies: string[];
 }
 
+/**
+ * Ce qu'une étape ne devrait pas demander à l'agent : le workflow Git et le ticket sont à DevBots.
+ *
+ * Les bornes de mot sont des lettres Unicode : `\b` voit une lettre accentuée
+ * comme une frontière, et « préciser » passait pour « PR ». Le sigle PR, lui,
+ * n'est reconnu qu'en majuscules.
+ */
+const WORKFLOW_STEP =
+  /(?<![\p{L}\p{N}_])(pull request|gh |git (push|commit|merge)|\/review-pr|fusionn\p{L}*|cr[ée]+r? (le |un )?worktree|supprim\p{L}* (le )?worktree|ferm\p{L}* (l'issue|le ticket|#\d+))/iu;
+const PR_ACRONYM = /(?<![\p{L}\p{N}_])PRs?(?![\p{L}\p{N}_])/u;
+
 export function checkPlan(plan: StoryPlan, ctx: PlanContext): FormCheck[] {
   const checks: FormCheck[] = [];
   const stepIds = new Set(plan.steps.map((s) => s.id));
@@ -404,6 +415,15 @@ export function checkPlan(plan: StoryPlan, ctx: PlanContext): FormCheck[] {
         section: 'steps',
         severity: 'warning',
         message: `L'étape ${step.id} ne cite aucun fichier : le graphe de dépendances ne pourra pas s'en servir.`
+      });
+    }
+    const stepText = `${step.title}\n${step.approach}`;
+    const workflow = WORKFLOW_STEP.exec(stepText) ?? PR_ACRONYM.exec(stepText);
+    if (workflow) {
+      checks.push({
+        section: 'steps',
+        severity: 'warning',
+        message: `L'étape ${step.id} semble relever de DevBots (« ${workflow[0].trim()} ») : worktree, commit, PR, merge et fermeture du ticket ne sont pas à l'agent. Commente la section pour la retirer.`
       });
     }
   }

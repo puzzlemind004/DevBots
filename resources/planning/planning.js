@@ -12,8 +12,11 @@
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
 
-  /** Brouillons de saisie : clé → texte. */
-  const drafts = Object.assign({ comments: {}, answers: {}, open: {} }, vscode.getState() || {});
+  /**
+   * Brouillons de saisie (clé → texte) et état d'affichage : sections pliées
+   * (folds), sections repliées en attente d'une réponse de Claude (waiting).
+   */
+  const drafts = Object.assign({ comments: {}, answers: {}, open: {}, folds: {}, waiting: [] }, vscode.getState() || {});
   let state = null;
 
   const saveDrafts = () => vscode.setState(drafts);
@@ -21,7 +24,14 @@
 
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'state') {
+      const wasBusy = Boolean(state && state.busy);
       state = event.data.state;
+      // Fin d'un appel : en cas d'erreur, les sections repliées pour l'attendre se rouvrent.
+      if (wasBusy && !state.busy && drafts.waiting.length) {
+        if (state.error) for (const key of drafts.waiting) drafts.folds[key] = true;
+        drafts.waiting = [];
+        saveDrafts();
+      }
       render();
     }
   });
@@ -77,19 +87,26 @@
   function render() {
     if (!state || !app) return;
     const scrollY = window.scrollY;
-    app.replaceChildren(
+    // replaceChildren() convertit null en texte « null » : on filtre comme el().
+    const sections = [
       header(),
       state.busy ? busyBanner() : null,
       state.error ? el('div', { class: 'banner error', role: 'alert' }, state.error) : null,
       state.phase === 'validated'
         ? el('div', { class: 'banner ok' }, 'Plan validé : la story est dans ready/.')
         : null,
-      understandingCard(),
-      state.plan ? planCard() : null,
-      state.plan ? versionsCard() : null,
-      state.plan && state.phase !== 'validated' ? validationCard() : null,
+      // Une fois le plan rédigé, c'est lui qu'on relit d'abord : la compréhension passe dessous.
+      ...(state.plan
+        ? [
+            planCard(),
+            state.phase !== 'validated' ? validationCard() : null,
+            understandingCard(),
+            versionsCard()
+          ]
+        : [understandingCard()]),
       historyCard()
-    );
+    ];
+    app.replaceChildren(...sections.filter((s) => s !== null));
     window.scrollTo(0, scrollY);
   }
 
@@ -153,33 +170,84 @@
 
     const questions = u.questions.map((q) => questionBlock(q, locked));
     const pending = u.questions.filter((q) => q.blocking && !answered(q.id)).length;
+    const answeredCount = u.questions.filter((q) => answered(q.id)).length;
 
-    return card(
+    // Une question jamais vue (identifiant ou libellé) rouvre la section, même repliée.
+    const keys = u.questions.map((q) => `${q.id}|${q.question}`);
+    if (drafts.seenQuestions && keys.some((k) => !drafts.seenQuestions.includes(k))) {
+      drafts.folds.understanding = true;
+    }
+    drafts.seenQuestions = keys;
+    saveDrafts();
+
+    return foldableCard(
+      'understanding',
       '1. Compréhension',
-      el('p', { class: 'restatement' }, u.restatement),
-      u.assumptions.length ? el('h3', null, 'Hypothèses') : null,
-      list(u.assumptions),
-      u.questions.length ? el('h3', null, 'Questions') : el('p', { class: 'muted' }, 'Aucune question : tout est clair pour Claude.'),
-      ...questions,
+      u.questions.length
+        ? `${answeredCount}/${u.questions.length} question${u.questions.length > 1 ? 's' : ''} répondue${answeredCount > 1 ? 's' : ''}`
+        : null,
+      [
+        el('p', { class: 'restatement' }, u.restatement),
+        u.assumptions.length ? el('h3', null, 'Hypothèses') : null,
+        list(u.assumptions),
+        u.questions.length ? el('h3', null, 'Questions') : el('p', { class: 'muted' }, 'Aucune question : tout est clair pour Claude.'),
+        ...questions
+      ],
       locked
         ? null
         : el(
             'div',
             { class: 'row actions' },
+            // Une réponse modifiée passe d'abord par Claude : elle peut soulever d'autres questions.
             u.questions.length
-              ? button('Renvoyer mes réponses', () => send({ type: 'understand' }), {
-                  secondary: true,
+              ? button('Envoyer mes réponses', () => sendCollapsing({ type: 'understand' }, ['understanding']), {
+                  secondary: !state.answersUnsent,
                   title: 'Claude met à jour sa compréhension, et peut poser de nouvelles questions'
                 })
               : null,
-            button(state.plan ? 'Réécrire tout le plan' : 'Rédiger le plan', () => send({ type: 'draft' }), {
-              disabled: !state.canDraft
-            }),
+            // Le plan ne se rédige qu'une fois les réponses lues et les questions bloquantes traitées ;
+            // sa réécriture est sous le plan.
+            state.canDraft && !state.plan
+              ? button('Rédiger le plan', () => sendCollapsing({ type: 'draft' }, ['understanding']))
+              : null,
             pending > 0
               ? el('span', { class: 'muted' }, `${pending} question${pending > 1 ? 's' : ''} bloquante${pending > 1 ? 's' : ''} sans réponse`)
-              : null
+              : state.answersUnsent
+                ? el('span', { class: 'muted' }, 'Réponses à envoyer avant le plan')
+                : null
           )
     );
+  }
+
+  /**
+   * Carte repliable : le titre plie et déplie le contenu, les actions restent
+   * dessous, visibles même repliée. L'état vit dans drafts.folds[key].
+   */
+  function foldableCard(key, title, hint, children, actions) {
+    const details = el(
+      'details',
+      { class: 'collapsible', open: drafts.folds[key] !== false },
+      el('summary', null, el('h2', null, title), hint ? el('span', { class: 'muted' }, hint) : null),
+      ...children
+    );
+    details.addEventListener('toggle', () => {
+      // Un événement d'une section déjà remplacée par un redessin ne compte pas.
+      if (!details.isConnected) return;
+      drafts.folds[key] = details.open;
+      saveDrafts();
+    });
+    return el('section', { class: 'card' }, details, actions);
+  }
+
+  /**
+   * Envoie une demande à Claude et replie les sections concernées le temps de
+   * la réponse. Si l'appel échoue, elles se rouvrent.
+   */
+  function sendCollapsing(msg, keys) {
+    for (const key of keys) drafts.folds[key] = false;
+    drafts.waiting = keys;
+    saveDrafts();
+    send(msg);
   }
 
   function criteriaBlock() {
@@ -263,14 +331,39 @@
   /* --- Plan ---------------------------------------------------- */
 
   function planCard() {
-    return card(
+    // Une nouvelle version, réponse de Claude à un commentaire ou une réécriture, rouvre le plan.
+    if (drafts.seenPlanVersion !== undefined && drafts.seenPlanVersion !== state.version) {
+      drafts.folds.plan = true;
+    }
+    drafts.seenPlanVersion = state.version;
+    saveDrafts();
+
+    const reviewedCount = state.sections.filter((s) => state.reviewed[s.id]).length;
+    return foldableCard(
+      'plan',
       `2. Plan v${state.version}`,
-      el(
-        'p',
-        { class: 'muted' },
-        "Commente une section pour la faire reprendre par Claude : seule cette section change. Coche « relu » quand le fond te va."
-      ),
-      ...state.sections.map((s) => sectionBlock(s.id, s.label))
+      `${reviewedCount}/${state.sections.length} section${state.sections.length > 1 ? 's' : ''} relue${reviewedCount > 1 ? 's' : ''}`,
+      [
+        el(
+          'p',
+          { class: 'muted' },
+          "Commente une section pour la faire reprendre par Claude : seule cette section change. Coche « relu » quand le fond te va."
+        ),
+        ...state.sections.map((s) => sectionBlock(s.id, s.label))
+      ],
+      state.phase === 'validated'
+        ? null
+        : el(
+            'div',
+            { class: 'row actions' },
+            button('Réécrire tout le plan', () => sendCollapsing({ type: 'draft' }, ['understanding', 'plan']), {
+              secondary: true,
+              disabled: !state.canDraft,
+              title: state.answersUnsent
+                ? "Envoie d'abord tes réponses modifiées, dans la compréhension"
+                : 'Nouvelle version complète, depuis la compréhension et tes réponses'
+            })
+          )
     );
   }
 
@@ -314,8 +407,7 @@
             if (!comment) return;
             delete drafts.comments[id];
             drafts.open[id] = false;
-            saveDrafts();
-            send({ type: 'revise', section: id, comment });
+            sendCollapsing({ type: 'revise', section: id, comment }, ['plan']);
           }),
           button('Annuler', () => {
             drafts.open[id] = false;
@@ -539,6 +631,9 @@
       el(
         'div',
         { class: 'row actions' },
+        notReviewed.length
+          ? button('Tout marquer relu', () => send({ type: 'reviewAll' }), { secondary: true })
+          : null,
         button('Passer en ready', () => send({ type: 'validate' }), { disabled: !state.canValidate }),
         el('span', { class: 'muted' }, 'Génère la fiche depuis le gabarit de plan et la place dans ready/.')
       )

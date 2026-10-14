@@ -351,8 +351,8 @@
       },
       {
         "command": "devbots.sendFeedback",
-        "title": "DevBots : renvoyer des retours à l'agent",
-        "icon": "$(comment-discussion)"
+        "title": "DevBots : écrire à l'agent (retours, réponse à un blocage)",
+        "icon": "$(mail)"
       },
       {
         "command": "devbots.showDiff",
@@ -363,6 +363,11 @@
         "command": "devbots.openWorktree",
         "title": "DevBots : ouvrir le worktree",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "devbots.openAgentSession",
+        "title": "DevBots : discuter avec l'agent dans Claude Code",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "devbots.serveApp",
@@ -489,12 +494,17 @@
           "group": "inline@2"
         },
         {
+          "command": "devbots.openAgentSession",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "inline@1"
+        },
+        {
           "command": "devbots.approve",
           "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
           "group": "inline@1"
         },
         {
-          "command": "devbots.sendFeedback",
+          "command": "devbots.openAgentSession",
           "when": "view == devbots.flow && viewItem =~ /^story:review:awaiting_human/",
           "group": "inline@2"
         },
@@ -516,7 +526,17 @@
         {
           "command": "devbots.openWorktree",
           "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "group": "inline@4"
+        },
+        {
+          "command": "devbots.openWorktree",
+          "when": "view == devbots.flow && viewItem =~ /^story:(dev|review)/",
           "group": "7_review@2"
+        },
+        {
+          "command": "devbots.sendFeedback",
+          "when": "view == devbots.flow && viewItem =~ /^story:(dev:blocked|review:awaiting_human)/",
+          "group": "7_review@0"
         },
         {
           "command": "devbots.serveApp",

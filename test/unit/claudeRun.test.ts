@@ -84,6 +84,17 @@ describe('parseStreamLine', () => {
       message: { content: [{ type: 'tool_result', is_error: true, content: 'This command requires approval' }] }
     });
     expect(parseStreamLine(refused)).toEqual([{ kind: 'toolError', detail: 'This command requires approval' }]);
+    const schema = line({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', is_error: true, content: "Output does not match required schema: root: must have required property 'lint'" }
+        ]
+      }
+    });
+    expect(parseStreamLine(schema).map(formatStreamEvent)).toEqual([
+      "↻ Sortie hors schéma, Claude la corrige : root: must have required property 'lint'"
+    ]);
     expect(parseStreamLine(line({ type: 'rate_limit_event' }))).toEqual([]);
     expect(parseStreamLine('pas du json')).toEqual([]);
   });

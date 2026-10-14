@@ -16,6 +16,52 @@ describe('checkPlan', () => {
     expect(checkPlan(samplePlan(), ctx)).toEqual([]);
   });
 
+  it('signale une étape qui relève de DevBots (PR, merge, worktree, ticket)', () => {
+    const base = samplePlan();
+    const plan = samplePlan({
+      steps: [
+        ...base.steps,
+        {
+          id: 3,
+          title: 'PR, revue, fusion et fermeture motivée de #119',
+          approach: 'Ouvrir une PR, la passer par /review-pr, puis fermer #119 avec gh.',
+          files: ['src/app/email.validator.ts']
+        }
+      ]
+    });
+    const checks = checkPlan(plan, ctx);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ section: 'steps', severity: 'warning' });
+    expect(checks[0]?.message).toContain("L'étape 3 semble relever de DevBots");
+    // Un mot courant comme « merge » d'objets ne déclenche rien.
+    const ok = samplePlan({
+      steps: [{ id: 1, title: 'Fusion des filtres', approach: 'Combiner les deux signaux avec computed.', files: ['a.ts'] }],
+      coverage: [
+        { criterion_id: 'C1', criterion: 'x', step_ids: [1] },
+        { criterion_id: 'C2', criterion: 'y', step_ids: [1] }
+      ]
+    });
+    expect(checkPlan(ok, ctx)).toEqual([]);
+  });
+
+  it('ne prend pas un mot accentué pour le sigle PR', () => {
+    const plan = samplePlan({
+      steps: [
+        {
+          id: 1,
+          title: 'Préciser le compte rendu',
+          approach: 'Il précise le 500 constaté, puis le 503 obtenu, et propose une approche.',
+          files: ['a.ts']
+        }
+      ],
+      coverage: [
+        { criterion_id: 'C1', criterion: 'x', step_ids: [1] },
+        { criterion_id: 'C2', criterion: 'y', step_ids: [1] }
+      ]
+    });
+    expect(checkPlan(plan, ctx)).toEqual([]);
+  });
+
   it('signale un critère orphelin', () => {
     const plan = samplePlan({ coverage: [{ criterion_id: 'C1', criterion: 'x', step_ids: [1] }] });
     const checks = checkPlan(plan, ctx);

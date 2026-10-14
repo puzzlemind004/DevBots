@@ -11,11 +11,11 @@ vers `main` reste hors de l'extension.
 | Bouton | Effet |
 | --- | --- |
 | ✓ Feu vert | Merge de la story, après confirmation (voir plus bas) |
-| 💬 Retours | Tes remarques repartent à l'agent |
+| 💬 Discuter | La conversation de l'agent, reprise dans Claude Code (voir [Dev et supervision](dev-et-supervision.md)) |
 | Diff | Vue diff native, fichier par fichier |
 | 📂 Worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |
 
-Le clic droit donne aussi le CR, le rapport de supervision, le journal et
+Le clic droit donne aussi « Écrire à l'agent » (tes retours), le CR, le rapport de supervision, le journal et
 « Lancer l'application ».
 
 ### Le diff

@@ -30,6 +30,8 @@ export interface PlanningState {
   phase: PlanningPhase;
   understanding?: Understanding;
   answers: Answers;
+  /** Une réponse a changé depuis la dernière compréhension : Claude ne l'a pas encore lue. */
+  answersUnsent?: boolean;
   versions: PlanVersion[];
   /** Sections cochées par toi lors de la revue de fond. Remises à zéro quand la section change. */
   reviewed: Partial<Record<PlanSection, boolean>>;
@@ -132,6 +134,7 @@ export class PlanStore {
     delete state.understanding;
     state.phase = 'understanding';
     state.answers = {};
+    delete state.answersUnsent;
     state.reviewed = {};
     state.resumes = 0;
     await this.appendHistory(storyId, { who: 'devbots', kind: 'réouverture', text: reason });

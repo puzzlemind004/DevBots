@@ -32,10 +32,12 @@ export function readPlanContext(rawCard: string): PlanContext {
 }
 
 export function parseCriteria(section: string): string[] {
-  const lines = section
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
+  const all = section.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim());
+  // Un trait horizontal clôt la section : derrière vient le pied de la fiche
+  // (« Ouvrir dans la source »), que rien d'autre ne sépare des critères quand
+  // ils forment la dernière section.
+  const rule = all.findIndex((l) => /^([-*_])(\s*\1){2,}$/.test(l));
+  const lines = (rule === -1 ? all : all.slice(0, rule))
     .filter((l) => l.length > 0)
     // Les mentions en italique (« _Aucun critère…_ ») ne sont pas des critères.
     .filter((l) => !/^_.*_$/.test(l));

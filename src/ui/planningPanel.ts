@@ -33,6 +33,7 @@ type Inbound =
   | { type: 'draft' }
   | { type: 'revise'; section: PlanSection; comment: string }
   | { type: 'reviewed'; section: PlanSection; value: boolean }
+  | { type: 'reviewAll' }
   | { type: 'validate' }
   | { type: 'cancel' }
   | { type: 'restart' }
@@ -128,6 +129,8 @@ export class PlanningPanel {
         return this.run('Claude reprend la section…', (signal) => s.reviseSection(msg.section, msg.comment, signal));
       case 'reviewed':
         return this.quiet(() => s.setReviewed(msg.section, msg.value));
+      case 'reviewAll':
+        return this.quiet(() => s.setAllReviewed());
       case 'cancel':
         this.abort?.abort();
         return;
@@ -264,6 +267,7 @@ export class PlanningPanel {
         resumes: s.state.resumes,
         understanding: s.state.understanding ?? null,
         answers: s.state.answers,
+        answersUnsent: s.answersUnsent,
         canDraft: s.canDraft,
         plan: s.currentPlan ?? null,
         criteria: s.context.criteria,

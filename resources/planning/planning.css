@@ -373,6 +373,34 @@ th {
   font-weight: bold;
 }
 
+.collapsible > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.collapsible > summary::before {
+  content: '▸';
+  width: 1em;
+}
+
+.collapsible[open] > summary::before {
+  content: '▾';
+}
+
+.collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible > summary h2 {
+  margin: 0;
+}
+
+.collapsible[open] > summary {
+  margin-bottom: 8px;
+}
+
 .history .entry {
   border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
   padding: 6px 0;

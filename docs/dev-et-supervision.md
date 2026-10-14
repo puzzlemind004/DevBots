@@ -18,7 +18,10 @@ choisir un autre.
    depuis `devbots.git.baseBranch` (vide : la branche courante) si elle
    n'existe pas encore. La branche `story/<id>-<slug>` et son worktree en
    partent, dans `<dépôt>.worktrees/`. Les dépendances sont installées, puis
-   les fichiers de la tâche déposés dans `.devbots/`.
+   les fichiers de la tâche déposés dans `.devbots/`. Sans projet à la racine,
+   chaque projet trouvé sur deux niveaux de sous-dossiers (`apps/web`…) est
+   installé avec la commande de son fichier de verrouillage.
+   `devbots.dev.installCommand` remplace cette détection.
 3. **Dev.** `claude -p` dans le worktree, avec ton skill de dev
    (`devbots.dev.skill`). L'agent implémente, lance build et tests, rédige le
    CR dans `.devbots/cr.md`. Il ne commite pas : l'extension commite son
@@ -173,6 +176,23 @@ dossiers restent la source de vérité pour New, Ready et Done.
   worktree intact.
 - « Relancer » la remet en file, compteur de boucles à zéro. L'agent reprend
   sa session et le travail en cours du worktree.
+- « Écrire à l'agent » (clic droit) fait de même avec ta réponse à son blocage, qu'il
+  reçoit dans sa session avec la raison du blocage et les corrections en
+  suspens. La notification de blocage propose aussi « Répondre ».
+- « Discuter avec l'agent dans Claude Code » (💬, ou « Discuter » dans la
+  notification) rouvre sa session, toute sa conversation comprise, par
+  `claude --resume` dans un terminal du worktree, en onglet. Le fermer n’arrête que ce Claude-là : un nouveau clic reprend la conversation. Le panneau de
+  l'extension Claude Code ne sait pas retrouver ces sessions nées de
+  `claude -p`.
+  Tu y travailles sous tes propres permissions : tu peux lui faire lancer
+  `npm ci`, par exemple. DevBots ne lit pas cet échange : la story reste
+  bloquée. À la fermeture du terminal, il propose « Relancer », qui fait
+  repartir l'agent dans cette même session, votre échange compris. Relancer
+  ou répondre pendant que la discussion est ouverte demande d'abord de la
+  fermer : deux Claude sur une même session se marcheraient dessus.
+- « Ouvrir le worktree » (📂 sur une story bloquée, clic droit sur toute
+  story en dev) l'ouvre dans une nouvelle fenêtre, un terminal,
+  l'explorateur de fichiers ou l'espace de travail.
 - « Retirer du flux de dev » rend à Ready une story en file, bloquée ou à
   valider, et libère ses fichiers ; son worktree et sa branche restent.
 - Fermer VS Code arrête les agents. Au démarrage suivant, les stories

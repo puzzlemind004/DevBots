@@ -147,7 +147,7 @@ ni dans `.work`.
 | DevBots : voir le diff | Story à valider, bloquée ou mergée : ses changements dans la vue diff native |
 | DevBots : ouvrir le worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |
 | DevBots : lancer l'application | `devbots.review.serveCommand` dans un terminal, sur le port du worktree |
-| DevBots : renvoyer des retours à l'agent | Tes remarques repartent dans sa session ; la story repasse par la revue |
+| DevBots : écrire à l'agent | Tes retours, ou ta réponse à un blocage, repartent dans sa session ; la story repasse par la revue |
 | DevBots : feu vert (merge) | Merge dans la branche de la feature, nettoyage, fiche dans Done |
 
 ## Documentation

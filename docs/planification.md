@@ -12,20 +12,29 @@ On l'ouvre par l'ampoule d'une story de New dans le panneau, ou par la commande
    `Read`, `Grep`, `Glob`), puis renvoie sa reformulation, ses hypothèses et ses
    questions. Chaque question propose des réponses et un champ libre ; les
    questions bloquantes sont marquées.
-2. **Réponses.** « Renvoyer mes réponses » laisse Claude mettre à jour sa
-   compréhension (et poser d'autres questions). « Rédiger le plan » n'est
-   actif qu'une fois les questions bloquantes répondues.
+2. **Réponses.** Cocher une réponse l'enregistre sans rien envoyer.
+   « Envoyer mes réponses » les transmet à Claude, qui met à jour sa
+   compréhension et peut poser d'autres questions. « Rédiger le plan »
+   n'apparaît qu'une fois tes réponses envoyées et les questions bloquantes
+   répondues : une réponse modifiée repasse toujours par la compréhension.
 3. **Plan structuré.** Claude remplit un schéma JSON imposé (`--json-schema`) :
    compréhension, couverture des critères, étapes, tests, dépendances et
-   risques, exécution.
+   risques, exécution. Le plan passe alors en tête du panneau, la
+   compréhension dessous ; « Réécrire tout le plan » est au bas du plan.
 4. **Revue par section.** « Commenter » renvoie ton commentaire dans la même
    session, avec la consigne de ne modifier que cette section. Le code le
    garantit : de la réponse, seules les clés de la section sont gardées. Une
    reprise des étapes peut aussi renuméroter la couverture, rien d'autre.
    Chaque reprise crée une version.
+
+   La compréhension et le plan se replient d'un clic sur leur titre. Ils se
+   replient d'eux-mêmes le temps d'une demande à Claude, et se rouvrent quand
+   la réponse arrive : nouvelle question pour la compréhension, nouvelle
+   version pour le plan, ou erreur.
 5. **Validation.** La checklist sépare la **forme**, vérifiée automatiquement,
    du **fond**, que tu coches section par section (« relu »). Une section qui
-   change doit être relue à nouveau. « Passer en ready » génère la fiche depuis
+   change doit être relue à nouveau ; « Tout marquer relu » les coche d'un
+   coup. « Passer en ready » génère la fiche depuis
    le gabarit et la place dans `ready/`.
 
 ## Contrôles de forme
@@ -39,6 +48,12 @@ On l'ouvre par l'ampoule d'une story de New dans le panneau, ou par la commande
 | Fiche sans critère et plan qui n'en extrait aucun | erreur |
 | Critères extraits par Claude (X1, X2…), absents de la source | avertissement |
 | Étape qui ne cite aucun fichier | avertissement |
+| Étape de worktree, commit, PR, merge ou fermeture du ticket : c'est à DevBots | avertissement |
+
+Le plan ne couvre que le travail de l'agent : code, tests, CR. Claude en est
+prévenu, même quand le `CLAUDE.md` ou les docs du dépôt décrivent un workflow
+manuel avec PR et revue ; l'agent de dev et la revue du CR ignorent ces
+étapes si un plan en contient encore.
 
 Les critères sont lus dans la section « Critères d'acceptation » de la fiche :
 ses éléments de liste, ou à défaut ses lignes.

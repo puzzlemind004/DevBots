@@ -88,11 +88,13 @@ describe('PlanningSession', () => {
     expect(session.canDraft).toBe(false);
 
     await session.setAnswer('Q1', { choice: 'Sous le champ' });
-    expect(session.canDraft).toBe(true);
+    expect(session.canDraft).toBe(false);
 
-    claude.reply(samplePlan());
+    claude.reply(sampleUnderstanding(), samplePlan());
+    await session.understand();
+    expect(session.canDraft).toBe(true);
     await session.draftPlan();
-    const draft = claude.requests[1]!;
+    const draft = claude.requests[2]!;
     expect(draft.resume).toBe('session-1');
     expect(draft.schema).toBe(PLAN_SCHEMA);
     expect(draft.prompt).toContain('Q1 (Où afficher le message ?) : Sous le champ');
@@ -110,6 +112,24 @@ describe('PlanningSession', () => {
     expect(claude.requests).toHaveLength(1);
   });
 
+  it('refuse le plan tant que les réponses modifiées ne sont pas envoyées', async () => {
+    claude.reply(sampleUnderstanding());
+    const session = await open();
+    await session.understand();
+    await session.setAnswer('Q1', { choice: 'Sous le champ' });
+    await expect(session.draftPlan()).rejects.toThrow(/Envoie d'abord tes réponses/);
+    expect(claude.requests).toHaveLength(1);
+  });
+
+  it('compte comme non envoyées les réponses d’un état sans indicateur', async () => {
+    claude.reply(sampleUnderstanding());
+    const session = await open();
+    await session.understand();
+    await session.setAnswer('Q1', { choice: 'Sous le champ' });
+    delete session.state.answersUnsent;
+    expect(session.canDraft).toBe(false);
+  });
+
   it('garde une réponse quand la question revient à la relance', async () => {
     claude.reply(sampleUnderstanding());
     const session = await open();
@@ -124,10 +144,11 @@ describe('PlanningSession', () => {
   });
 
   async function planned(): Promise<PlanningSession> {
-    claude.reply(sampleUnderstanding(), samplePlan());
+    claude.reply(sampleUnderstanding(), sampleUnderstanding(), samplePlan());
     const session = await open();
     await session.understand();
     await session.setAnswer('Q1', { choice: 'Sous le champ' });
+    await session.understand();
     await session.draftPlan();
     return session;
   }
@@ -166,13 +187,20 @@ describe('PlanningSession', () => {
     expect(reopened.currentVersion).toBe(1);
     expect(reopened.currentPlan).toEqual(samplePlan());
     const history = await store.readHistory('42');
-    expect(history.map((h) => h.kind)).toEqual(['compréhension', 'réponses', 'plan v1']);
+    expect(history.map((h) => h.kind)).toEqual(['compréhension', 'réponses', 'compréhension', 'plan v1']);
   });
 
   it('plafonne les reprises de session', async () => {
     const session = await planned();
     session.state.resumes = SETTINGS.maxResumes;
     await expect(session.reviseSection('tests', 'encore')).rejects.toThrow(/Plafond/);
+  });
+
+  it('marque toutes les sections relues d’un coup', async () => {
+    const session = await planned();
+    await session.setAllReviewed();
+    expect(ALL.every((s) => session.state.reviewed[s])).toBe(true);
+    expect(session.canValidate).toBe(true);
   });
 
   it('passe en ready après relecture complète, et retire la fiche de new/', async () => {
@@ -193,10 +221,11 @@ describe('PlanningSession', () => {
   });
 
   it('refuse la validation tant que la forme a une erreur', async () => {
-    claude.reply(sampleUnderstanding(), samplePlan({ dependencies: [] }));
+    claude.reply(sampleUnderstanding(), sampleUnderstanding(), samplePlan({ dependencies: [] }));
     const session = await open();
     await session.understand();
     await session.setAnswer('Q1', { choice: 'x' });
+    await session.understand();
     await session.draftPlan();
     for (const s of ALL) {
       await session.setReviewed(s, true);

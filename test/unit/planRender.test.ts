@@ -21,6 +21,18 @@ describe('parseCriteria', () => {
   it('ignore la mention « à extraire »', () => {
     expect(parseCriteria("_Aucun critère dans la source. À extraire à la planification._")).toEqual([]);
   });
+
+  it('s’arrête au trait horizontal du pied de fiche', () => {
+    const section = [
+      "_Aucun critère dans la source. À extraire à la planification._",
+      '',
+      '---',
+      '',
+      '[Ouvrir dans la source](https://github.com/o/r/issues/73)'
+    ].join('\n');
+    expect(parseCriteria(section)).toEqual([]);
+    expect(parseCriteria('- un\n- deux\n\n---\n\n[Ouvrir dans la source](u)')).toEqual(['un', 'deux']);
+  });
 });
 
 describe('readPlanContext', () => {
