@@ -138,7 +138,10 @@ export const UNDERSTANDING_SCHEMA = {
   additionalProperties: false,
   required: ['restatement', 'assumptions', 'questions'],
   properties: {
-    restatement: { type: 'string', description: 'La story reformulée en quelques phrases.' },
+    restatement: {
+      type: 'string',
+      description: 'La story reformulée : paragraphes courts séparés par une ligne vide, liste à puces si plusieurs points.'
+    },
     assumptions: { ...stringList, description: 'Hypothèses retenues faute d\'information.' },
     questions: {
       type: 'array',
@@ -178,7 +181,7 @@ export const PLAN_SCHEMA = {
       additionalProperties: false,
       required: ['restatement', 'assumptions', 'decisions'],
       properties: {
-        restatement: { type: 'string' },
+        restatement: { type: 'string', description: 'Paragraphes courts séparés par une ligne vide.' },
         assumptions: stringList,
         decisions: { ...stringList, description: 'Décisions tirées des réponses aux questions.' }
       }
@@ -207,7 +210,10 @@ export const PLAN_SCHEMA = {
         properties: {
           id: { type: 'integer', description: 'Numéro d\'ordre, à partir de 1.' },
           title: { type: 'string' },
-          approach: { type: 'string' },
+          approach: {
+            type: 'string',
+            description: 'Une phrase de but, puis les actions en liste à puces (« - »).'
+          },
           files: { ...stringList, description: 'Chemins relatifs à la racine du dépôt.' }
         }
       }
@@ -241,7 +247,7 @@ export const PLAN_SCHEMA = {
       properties: {
         model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'] },
         complexity: { type: 'string', enum: ['low', 'medium', 'high'] },
-        rationale: { type: 'string' }
+        rationale: { type: 'string', description: 'Deux ou trois phrases.' }
       }
     }
   }

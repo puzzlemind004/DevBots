@@ -240,6 +240,25 @@ textarea {
   font-size: 1.05em;
 }
 
+/* Texte libre de Claude : des blocs courts, aérés, plutôt qu'un pavé. */
+.prose {
+  max-width: 80ch;
+  line-height: 1.5;
+}
+
+.prose p {
+  margin: 0 0 8px;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0 0 8px;
+}
+
+.prose li + li {
+  margin-top: 2px;
+}
+
 .question {
   border-left: 3px solid var(--vscode-inputValidation-warningBorder, orange);
   padding: 4px 0 4px 12px;
@@ -336,8 +355,8 @@ textarea {
   margin-bottom: 8px;
 }
 
-.steps p {
-  margin: 2px 0;
+.steps .prose {
+  margin: 4px 0;
 }
 
 .files {

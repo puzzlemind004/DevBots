@@ -73,7 +73,65 @@
 
   function list(items, empty) {
     if (!items || items.length === 0) return empty ? el('p', { class: 'muted' }, empty) : null;
-    return el('ul', null, items.map((i) => el('li', null, i)));
+    return el('ul', null, items.map((i) => el('li', null, inline(i))));
+  }
+
+  /**
+   * Texte libre de Claude en blocs lisibles : paragraphes séparés par une ligne
+   * vide, listes à puces ou numérotées, retours à la ligne gardés. Construit en
+   * nœuds, jamais en HTML : le texte reste du texte.
+   */
+  function prose(text, cls) {
+    const blocks = [];
+    let para = [];
+    let items = null;
+    const flushPara = () => {
+      if (para.length) blocks.push(el('p', null, para.flatMap((line, i) => (i ? [el('br'), ...inline(line)] : inline(line)))));
+      para = [];
+    };
+    const flushList = () => {
+      if (items) blocks.push(el(items.ordered ? 'ol' : 'ul', null, items.lines.map((l) => el('li', null, inline(l)))));
+      items = null;
+    };
+    for (const raw of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
+      const line = raw.trim();
+      const bullet = /^([-*•]|\d+[.)])\s+(.*)$/.exec(line);
+      if (!line) {
+        flushPara();
+        flushList();
+      } else if (bullet) {
+        flushPara();
+        const ordered = /^\d/.test(bullet[1]);
+        if (items && items.ordered !== ordered) flushList();
+        if (!items) items = { ordered, lines: [] };
+        items.lines.push(bullet[2]);
+      } else if (items && /^\s/.test(raw)) {
+        // Suite indentée de l'élément précédent.
+        items.lines[items.lines.length - 1] += ` ${line}`;
+      } else {
+        flushList();
+        para.push(line.replace(/^#+\s+/, ''));
+      }
+    }
+    flushPara();
+    flushList();
+    return el('div', { class: `prose${cls ? ` ${cls}` : ''}` }, blocks);
+  }
+
+  /** `code` et **gras** dans une ligne ; le reste en texte brut. */
+  function inline(text) {
+    const parts = [];
+    const re = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+    let last = 0;
+    let m;
+    const s = String(text);
+    while ((m = re.exec(s))) {
+      if (m.index > last) parts.push(s.slice(last, m.index));
+      parts.push(m[1] !== undefined ? el('code', null, m[1]) : el('strong', null, m[2]));
+      last = re.lastIndex;
+    }
+    if (last < s.length) parts.push(s.slice(last));
+    return parts;
   }
 
   function card(title, ...children) {
@@ -187,7 +245,7 @@
         ? `${answeredCount}/${u.questions.length} question${u.questions.length > 1 ? 's' : ''} répondue${answeredCount > 1 ? 's' : ''}`
         : null,
       [
-        el('p', { class: 'restatement' }, u.restatement),
+        prose(u.restatement, 'restatement'),
         u.assumptions.length ? el('h3', null, 'Hypothèses') : null,
         list(u.assumptions),
         u.questions.length ? el('h3', null, 'Questions') : el('p', { class: 'muted' }, 'Aucune question : tout est clair pour Claude.'),
@@ -289,7 +347,7 @@
           disabled: locked || Boolean(state.busy),
           onchange: () => commit({ choice })
         }),
-        choice
+        ...inline(choice)
       )
     );
     if (current.choice && !locked) {
@@ -320,7 +378,7 @@
         { class: 'question-title' },
         el('strong', null, q.id),
         ' ',
-        q.question,
+        ...inline(q.question),
         q.blocking ? el('span', { class: 'badge error' }, 'bloquante') : el('span', { class: 'badge' }, 'facultative')
       ),
       el('div', { class: 'choices' }, choices),
@@ -449,7 +507,7 @@
         return el(
           'div',
           null,
-          el('p', null, p.understanding.restatement),
+          prose(p.understanding.restatement),
           p.understanding.assumptions.length ? el('h4', null, 'Hypothèses') : null,
           list(p.understanding.assumptions),
           p.understanding.decisions.length ? el('h4', null, 'Décisions') : null,
@@ -468,7 +526,7 @@
                   el(
                     'tr',
                     null,
-                    el('td', null, el('strong', null, c.criterion_id), ' ', c.criterion),
+                    el('td', null, el('strong', null, c.criterion_id), ' ', ...inline(c.criterion)),
                     el('td', null, c.step_ids.length ? c.step_ids.join(', ') : '—')
                   )
                 )
@@ -483,8 +541,8 @@
             el(
               'li',
               { value: s.id },
-              el('strong', null, s.title),
-              el('p', null, s.approach),
+              el('strong', null, ...inline(s.title)),
+              prose(s.approach),
               s.files.length ? el('div', { class: 'files' }, s.files.map((f) => el('code', null, f))) : null
             )
           )
@@ -515,7 +573,7 @@
                     ' ',
                     el('span', { class: `badge ${d.verdict === 'confirmed' ? 'warn' : 'ok'}` }, d.verdict === 'confirmed' ? 'confirmée' : 'infirmée — parallélisable'),
                     ' ',
-                    d.reason
+                    ...inline(d.reason)
                   )
                 )
               )
@@ -537,7 +595,7 @@
             ' · complexité ',
             el('strong', null, complexity[p.execution.complexity] || p.execution.complexity)
           ),
-          p.execution.rationale ? el('p', { class: 'muted' }, p.execution.rationale) : null
+          p.execution.rationale ? prose(p.execution.rationale, 'muted') : null
         );
       }
       default:
