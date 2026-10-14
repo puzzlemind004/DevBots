@@ -9,7 +9,7 @@ On l'ouvre par l'ampoule d'une story de New dans le panneau, ou par la commande
 ## Déroulé
 
 1. **Compréhension.** Claude lit la fiche et explore le code (en lecture seule :
-   `Read`, `Grep`, `Glob`), puis renvoie sa reformulation, ses hypothèses et ses
+   `Read`, `Grep`, `Glob`, plus `Skill`), puis renvoie sa reformulation, ses hypothèses et ses
    questions. Chaque question propose des réponses et un champ libre ; les
    questions bloquantes sont marquées.
 2. **Réponses.** Cocher une réponse l'enregistre sans rien envoyer.
@@ -70,6 +70,13 @@ Fermer l'onglet arrête l'appel en cours. « Annuler » aussi.
 Si `devbots.planning.skill` est renseigné, le premier prompt commence par
 `/<skill>` : ton skill de planification guide Claude, la forme de la réponse
 restant imposée par le schéma.
+
+Le skill tient alors la méthode, et DevBots ne garde que le contrat : la fiche
+et ses critères, les deux phases, le format du plan et l'absence d'étapes de
+worktree, de commit ou de merge. Sans skill, DevBots donne une méthode
+générique (explorer le code, prévoir les tests, choisir le modèle). L'outil
+`Skill` permet au skill du dépôt d'en appeler d'autres, toujours en lecture
+seule : un skill appelé n'a pas plus d'outils que la session.
 
 ## `.work/plans/<id>/`
 

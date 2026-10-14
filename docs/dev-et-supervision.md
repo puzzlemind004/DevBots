@@ -68,6 +68,13 @@ corrections en suspens sont gardées : « Relancer » les renvoie à l'agent.
 | --- | --- |
 | `Read`, `Grep`, `Glob`, `Edit`, `Write` | Le worktree |
 | `Bash` | Les seules commandes de `devbots.dev.allowedCommands`, par préfixe |
+| `Skill` | Les skills du dépôt, de ses plugins et de ton dossier utilisateur |
+
+Avec `devbots.dev.skill`, le skill tient la méthode : DevBots ne garde que le
+contrat (les fichiers de `.devbots/`, le plan à suivre, pas de commit ni de
+serveur de dev, le CR, le statut du build et des tests). Sans skill, il demande
+d'implémenter le plan étape par étape et de valider par le build et les tests.
+Un skill appelé par un autre n'a pas plus d'outils que la session.
 
 Le mode de permission est `default` : en `-p`, tout ce qui n'est pas autorisé
 est refusé, y compris la redirection d'un `echo` vers un fichier. Restent
@@ -75,8 +82,9 @@ refusés quoi qu'il arrive : `git push`, `git commit`, `git merge`,
 `git rebase`, les changements de branche, `git worktree`, `ng serve` et
 `npm start`. Les refus figurent au journal.
 
-La revue du CR et les étapes de supervision n'ont que `Read`, `Grep` et
-`Glob`, plus les règles que l'étape ajoute avec `tools`.
+La revue du CR n'a que `Read`, `Grep` et `Glob`. Les étapes de supervision y
+ajoutent `Skill`, pour que leur skill en appelle d'autres, et les règles que
+l'étape ajoute avec `tools`.
 
 ## `.devbots/` dans chaque worktree
 

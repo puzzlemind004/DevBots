@@ -82,7 +82,10 @@ describe('PlanningSession', () => {
     expect(first.prompt.startsWith('/plan-story\n')).toBe(true);
     expect(first.prompt).toContain('.work/new/42-valider-l-email.md');
     expect(first.prompt).toContain('C2 : Un message explique pourquoi');
-    expect(first.tools).toEqual(['Read', 'Grep', 'Glob']);
+    expect(first.tools).toEqual(['Read', 'Grep', 'Glob', 'Skill']);
+    // Avec un skill, la méthode est la sienne.
+    expect(first.prompt).toContain('comme le prévoit ton skill');
+    expect(first.prompt).not.toContain('explore le code');
     expect(first.model).toBe('opus');
     expect(session.state.sessionId).toBe('session-1');
     expect(session.canDraft).toBe(false);
@@ -100,8 +103,29 @@ describe('PlanningSession', () => {
     expect(draft.prompt).toContain('Q1 (Où afficher le message ?) : Sous le champ');
     expect(draft.prompt).toContain('Q2 (Bloquer le bouton ?) : sans réponse');
     expect(draft.prompt).toContain('Dépendances déclarées dans la source : 40');
+    expect(draft.prompt).toContain('suit ton skill');
+    expect(draft.prompt).not.toContain('opus pour le délicat');
     expect(session.currentVersion).toBe(1);
     expect(session.state.phase).toBe('planning');
+  });
+
+  it('donne une méthode générique sans skill du dépôt', async () => {
+    claude.reply(sampleUnderstanding(), sampleUnderstanding(), samplePlan());
+    const session = await PlanningSession.open(
+      { store, runner: claude.run, repoRoot: root, settings: { ...SETTINGS, skill: '' } },
+      storyFile,
+      '42',
+      'Valider'
+    );
+    await session.understand();
+    await session.setAnswer('Q1', { choice: 'Sous le champ' });
+    await session.understand();
+    await session.draftPlan();
+    const [first, , draft] = claude.requests;
+    expect(first!.prompt.startsWith('/')).toBe(false);
+    expect(first!.prompt).toContain('explore le code');
+    expect(draft!.prompt).toContain('opus pour le délicat');
+    expect(draft!.prompt).not.toContain('ton skill');
   });
 
   it('refuse le plan tant qu\'une question bloquante est sans réponse', async () => {

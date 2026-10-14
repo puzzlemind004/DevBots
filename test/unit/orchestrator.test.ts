@@ -213,12 +213,17 @@ describe('Orchestrator', () => {
     expect(dev.model).toBe('sonnet');
     expect(dev.cwd).toBe(run.worktree);
     expect(dev.allowedTools).toContain('Bash(npm test:*)');
+    expect(dev.allowedTools).toContain('Skill');
     expect(dev.disallowedTools).toContain('Bash(git push:*)');
-    // Revue et étape : sessions neuves, lecture seule.
+    // Avec un skill, la méthode est la sienne.
+    expect(dev.prompt).toContain('comme le prévoit ton skill');
+    expect(dev.prompt).not.toContain('étape par étape');
+    // Revue et étape : sessions neuves, lecture seule ; seule l'étape a un skill.
     const [, review, step] = claude.requests;
     expect(review!.resume).toBeUndefined();
     expect(review!.tools).toEqual(['Read', 'Grep', 'Glob']);
     expect(step!.prompt.startsWith('/pre-pr-check\n')).toBe(true);
+    expect(step!.tools).toContain('Skill');
     expect(step!.resume).toBeUndefined();
 
     // Fichiers de la tâche dans le worktree.
