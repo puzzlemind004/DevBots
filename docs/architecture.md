@@ -22,6 +22,7 @@ src/
 │   ├── planRender.ts   Plan → markdown, fiche de ready/ depuis le gabarit
 │   ├── planStore.ts    .work/plans/<id>/ : état, versions, historique
 │   ├── templates.ts    Gabarits du plan et du CR : ceux du dépôt, sinon par défaut
+│   ├── initSkill.ts    Le skill devbots-init : assemblage et dépôt dans .claude/skills/
 │   ├── planning.ts     L'atelier de planification, sans interface
 │   ├── flowState.ts    state.json : le parcours des stories après Ready
 │   ├── schedule.ts     Ordonnancement : dépendances retenues, fichiers occupés
@@ -42,6 +43,7 @@ src/
 │   ├── importCommand.ts La commande d'import
 │   ├── localCardCommands.ts Nouvelle story, nouvelle feature
 │   ├── templatesCommand.ts Personnaliser les gabarits
+│   ├── initSkillCommand.ts Installer le skill d'initialisation
 │   ├── planningPanel.ts L'onglet de l'atelier (webview)
 │   ├── devController.ts Dev, supervision et revue : commandes, journaux, barre d'état, badge
 │   ├── resyncCommand.ts Resynchronisation, minuteur, « voir les changements »
@@ -53,6 +55,7 @@ src/
     ├── files.ts        Écriture et lecture des fichiers d'état, sûres sous Windows
     └── resolveCommand.ts Trouver l'exécutable sous Windows, sans shell
 resources/planning/     Script et styles de la page de l'atelier
+resources/init-skill/   Étapes et contrat du skill devbots-init
 ```
 
 `core/` ne connaît pas `vscode` : c'est là que vit la logique testable, et les

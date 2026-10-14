@@ -26,6 +26,7 @@ import { deleteCard } from './ui/deleteCommand.js';
 import { newFeature, newStory } from './ui/localCardCommands.js';
 import { PlanningPanel } from './ui/planningPanel.js';
 import { customizeTemplates } from './ui/templatesCommand.js';
+import { installInitSkillCommand } from './ui/initSkillCommand.js';
 import { DevController } from './ui/devController.js';
 import { SourceSync } from './ui/resyncCommand.js';
 import { UsageViewProvider } from './ui/usageView.js';
@@ -168,6 +169,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
     vscode.commands.registerCommand('devbots.customizeTemplates', () =>
       customizeTemplates({ repoUri: folder.uri, log })
+    ),
+    vscode.commands.registerCommand('devbots.installInitSkill', () =>
+      installInitSkillCommand({ repoUri: folder.uri, extension: context.extension, log })
     )
   );
 

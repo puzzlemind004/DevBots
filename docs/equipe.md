@@ -52,6 +52,20 @@ Pense à monter `version` dans `package.json` avant de diffuser.
 
 ## Configurer un dépôt
 
+Le plus simple : « DevBots : installer le skill d'initialisation », puis
+`/devbots-init` dans une session Claude Code à la racine du dépôt. Claude fait
+l'état des lieux du dépôt, te demande ce que tu veux personnaliser (source,
+skills de planification, de dev et de supervision, gabarits, commandes
+autorisées…), construit avec toi les skills qui manquent et écrit les fichiers
+ci-dessous. Le skill porte la liste des réglages et les gabarits par défaut de
+la version installée de DevBots : réinstalle-le après une mise à jour.
+
+Les étapes de DevBots sont réparties ainsi : l'extension tient le contrat de
+chaque étape (entrées, format de sortie, git), les skills du dépôt tiennent la
+méthode, et peuvent en appeler d'autres.
+
+À la main :
+
 Les réglages d'un dépôt vont dans son `.vscode/settings.json`, versionné :
 toute l'équipe partage la même source, les mêmes commandes autorisées, les
 mêmes checks.

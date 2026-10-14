@@ -153,6 +153,7 @@ ni dans `.work`.
 | DevBots : rapport de vérification « déjà fait » | Clic droit sur une story passée dans Done après vérification : le rapport de l'agent |
 | DevBots : relever l'usage Claude | Relevé frais de la session et de la semaine, par un appel minimal à haiku (aussi : ↻ de la vue « Usage Claude ») |
 | DevBots : personnaliser la supervision | Dépose `.work/supervision.json` prérempli et l'ouvre |
+| DevBots : installer le skill d'initialisation | Dépose `.claude/skills/devbots-init/` ; `/devbots-init` dans Claude Code configure ensuite le dépôt avec toi (voir [Guide de l'équipe](docs/equipe.md#configurer-un-dépôt)) |
 | DevBots : voir le diff | Story à valider, bloquée ou mergée : ses changements dans la vue diff native |
 | DevBots : ouvrir le worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |
 | DevBots : lancer l'application | `devbots.review.serveCommand` dans un terminal, sur le port du worktree |

@@ -264,7 +264,7 @@
     "viewsWelcome": [
       {
         "view": "devbots.flow",
-        "contents": "Aucune story pour l'instant.\n\n[Importer des tickets](command:devbots.importTickets)\n\n[Ajouter une story à la main](command:devbots.newStory)\n\nTu choisis dans la liste des issues GitHub ou des work items Azure DevOps ouverts. Les stories importées ou saisies arrivent dans `.work/new`."
+        "contents": "Aucune story pour l'instant.\n\nPremier passage dans ce dépôt ? [Installer le skill d'initialisation](command:devbots.installInitSkill), puis lance /devbots-init dans Claude Code.\n\n[Importer des tickets](command:devbots.importTickets)\n\n[Ajouter une story à la main](command:devbots.newStory)\n\nTu choisis dans la liste des issues GitHub ou des work items Azure DevOps ouverts. Les stories importées ou saisies arrivent dans `.work/new`."
       }
     ],
     "commands": [
@@ -424,6 +424,10 @@
       {
         "command": "devbots.customizeSupervision",
         "title": "DevBots : personnaliser la supervision"
+      },
+      {
+        "command": "devbots.installInitSkill",
+        "title": "DevBots : installer le skill d'initialisation"
       }
     ],
     "menus": {
