@@ -2,7 +2,7 @@
   "name": "devbots",
   "displayName": "DevBots",
   "description": "Flux de dev guidé dans VS Code : import des tickets, planification, agents Claude Code, review et merge.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "alpidev",
   "private": true,
   "license": "UNLICENSED",
