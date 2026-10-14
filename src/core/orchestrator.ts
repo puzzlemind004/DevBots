@@ -39,6 +39,7 @@ import {
   featureBranchName,
   Git,
   GitError,
+  type StoryGit,
   storyBranchName,
   worktreeDir
 } from './git.js';
@@ -158,21 +159,25 @@ export interface OrchestratorDeps {
   check?: (dir: string, command: string) => Promise<void>;
   /** Horloge, pour les tests. */
   now?: () => Date;
+  /** Les opérations git. Par défaut, le vrai git sur `repoRoot`. */
+  git?: StoryGit;
 }
 
 /** Arrêt demandé par toi : pas une erreur, mais un blocage à relancer. */
 class StopRequested extends Error {}
 
 export class Orchestrator {
-  private readonly git: Git;
+  private readonly git: StoryGit;
   private readonly running = new Map<string, AbortController>();
   private readonly pipelines = new Set<Promise<void>>();
   private pumping: Promise<void> = Promise.resolve();
   /** Les merges s'enchaînent : un seul à la fois. */
   private merging: Promise<void> = Promise.resolve();
+  /** Par story, les diffs écrits dans `.devbots/` et ce dont ils dépendent. */
+  private readonly diffs = new Map<string, { key: string; base: string }>();
 
   constructor(private readonly deps: OrchestratorDeps) {
-    this.git = new Git(deps.repoRoot);
+    this.git = deps.git ?? new Git(deps.repoRoot);
   }
 
   /** Les stories dont un processus tourne en ce moment. */
@@ -815,8 +820,7 @@ export class Orchestrator {
   private async supervise(run: StoryRun, steps: SupervisionStep[], signal: AbortSignal): Promise<StepResult[]> {
     await this.setStatus(run.storyId, 'pre_pr_check');
     // La revue du CR a pu être sautée : les diffs sont à remettre à jour.
-    await this.writeDiff(run);
-    const base = await this.git.run(['merge-base', run.baseBranch, 'HEAD'], run.worktree);
+    const base = await this.writeDiff(run);
     const changed = await this.git.changedFiles(run.worktree, base);
     const previous = run.verification?.results ?? [];
     const results: StepResult[] = [];
@@ -968,7 +972,7 @@ export class Orchestrator {
         }
       }
 
-      const mergeBase = await this.git.run(['rev-parse', base]);
+      const mergeBase = await this.git.revParse(base);
       const head = await this.git.headCommit(cwd);
       await this.git.fastForward(base, head);
       await this.journal(storyId, `Mergée dans ${base} : ${head.slice(0, 8)}.`);
@@ -1168,8 +1172,20 @@ export class Orchestrator {
     this.deps.onEvent?.({ kind: 'blocked', storyId: run.storyId, title: run.title, reason });
   }
 
-  private async writeDiff(run: StoryRun): Promise<void> {
-    const base = await this.git.run(['merge-base', run.baseBranch, 'HEAD'], run.worktree);
+  /**
+   * Écrit les diffs de la story dans `.devbots/`, et rend son point de départ
+   * sur la branche de la feature. Rien n'est recalculé tant que la story n'a
+   * pas de nouveau commit : revue et supervision d'un même passage partagent
+   * les mêmes diffs.
+   */
+  private async writeDiff(run: StoryRun): Promise<string> {
+    const head = await this.git.headCommit(run.worktree);
+    const key = [run.worktree, run.baseBranch, head, run.verification?.commit ?? ''].join('\n');
+    const written = this.diffs.get(run.storyId);
+    if (written?.key === key) {
+      return written.base;
+    }
+    const base = await this.git.mergeBase(run.worktree, run.baseBranch, head);
     const dir = path.join(run.worktree, DEVBOTS_DIR);
     await fs.writeFile(path.join(dir, 'diff-stat.txt'), await this.git.diffStat(run.worktree, base), 'utf8');
     await fs.writeFile(path.join(dir, 'diff.patch'), await this.git.diff(run.worktree, base), 'utf8');
@@ -1177,6 +1193,8 @@ export class Orchestrator {
     if (run.verification) {
       await fs.writeFile(path.join(dir, 'fix.patch'), await this.git.diff(run.worktree, run.verification.commit), 'utf8');
     }
+    this.diffs.set(run.storyId, { key, base });
+    return base;
   }
 
   private async copyCr(run: StoryRun): Promise<void> {

@@ -198,8 +198,10 @@ savoir de VS Code ; `ui/devController.ts` relaie tes gestes et affiche les
 - Les écritures de `state.json` s'enchaînent dans un seul `FlowStateStore` ;
   les lancements aussi (`pump`), si bien qu'une story ne démarre jamais deux
   fois.
-- Les tests de l'orchestrateur tournent sur un vrai dépôt git temporaire, avec
-  un faux CLI.
+- Les tests de l'orchestrateur tournent sur un faux git en mémoire
+  (`test/unit/fakeGit.ts`) et un faux CLI. Le parcours complet et les merges
+  passent par un vrai dépôt git temporaire, dans `orchestrator.git.test.ts` :
+  un dépôt par test, tous en parallèle.
 - Les merges s'enchaînent dans une seule file (`approve`), indépendante de
   celle des agents : jamais deux merges à la fois. Un conflit ou un check en
   échec remet la story dans la file des agents, avec ses corrections. Le

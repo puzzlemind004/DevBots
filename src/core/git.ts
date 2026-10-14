@@ -52,6 +52,28 @@ export interface FileChange {
   path: string;
 }
 
+/** Ce dont l'orchestrateur se sert : de quoi lui donner un faux git en test. */
+export type StoryGit = Pick<
+  Git,
+  | 'currentBranch'
+  | 'ensureBranch'
+  | 'ensureWorktree'
+  | 'exclude'
+  | 'headCommit'
+  | 'revParse'
+  | 'mergeBase'
+  | 'commitAll'
+  | 'changedFiles'
+  | 'diffStat'
+  | 'diff'
+  | 'abortInProgress'
+  | 'isAncestor'
+  | 'integrate'
+  | 'fastForward'
+  | 'removeWorktree'
+  | 'deleteBranch'
+>;
+
 export class Git {
   constructor(private readonly repoRoot: string) {}
 
@@ -120,7 +142,17 @@ export class Git {
   }
 
   headCommit(cwd = this.repoRoot): Promise<string> {
-    return this.run(['rev-parse', 'HEAD'], cwd);
+    return this.revParse('HEAD', cwd);
+  }
+
+  /** Le commit que désigne `ref`. */
+  revParse(ref: string, cwd = this.repoRoot): Promise<string> {
+    return this.run(['rev-parse', ref], cwd);
+  }
+
+  /** Le dernier ancêtre commun de `a` et `b`. */
+  mergeBase(cwd: string, a: string, b: string): Promise<string> {
+    return this.run(['merge-base', a, b], cwd);
   }
 
   /**
