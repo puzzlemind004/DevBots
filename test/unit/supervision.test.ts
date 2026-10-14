@@ -56,7 +56,7 @@ describe('configuration de la supervision', () => {
   it('lit le fichier déposé par « personnaliser la supervision », sans les étapes désactivées', async () => {
     await fs.writeFile(path.join(work, 'supervision.json'), DEFAULT_SUPERVISION_FILE, 'utf8');
     const config = await readSupervisionConfig(work);
-    expect(config.maxLoops).toBe(3);
+    expect(config.maxLoops).toBe(2);
     expect(config.steps).toEqual([
       { name: 'pre-pr-check', skill: 'pre-pr-check', agent: undefined, when: [], blocking: true, tools: [], model: undefined }
     ]);
@@ -128,7 +128,7 @@ describe('triage', () => {
   it('range les problèmes selon leur classement', () => {
     const t = triage([
       result([
-        issue({ title: 'A', classification: 'blocking' }),
+        issue({ title: 'A', classification: 'blocking', severity: 'major' }),
         issue({ title: 'B', classification: 'followup_complex' }),
         issue({ title: 'C', classification: 'followup_simple', miniPlan: '1. Corriger.' }),
         issue({ title: 'D', classification: 'none' })
@@ -143,12 +143,26 @@ describe('triage', () => {
   });
 
   it("un bloquant d'une étape non bloquante ne retient pas la story", () => {
-    const t = triage([result([issue({ classification: 'blocking' })], false)]);
+    const t = triage([result([issue({ classification: 'blocking', severity: 'blocking' })], false)]);
     expect(t.blocking).toEqual([]);
     expect(t.complex).toHaveLength(1);
   });
 
-  it('une fiche simple sans mini-plan part à la planification', () => {
+  it('un bloquant de gravité mineure devient une fiche de suivi, un informatif une information', () => {
+    const t = triage([
+      result([
+        issue({ title: 'Lien manquant', classification: 'blocking', severity: 'minor', miniPlan: '1. Ajouter le lien.' }),
+        issue({ title: 'BEM à plat', classification: 'blocking', severity: 'minor' }),
+        issue({ title: 'Remarque', classification: 'blocking', severity: 'info' })
+      ])
+    ]);
+    expect(t.blocking).toEqual([]);
+    expect(t.simple.map((i) => i.title)).toEqual(['Lien manquant']);
+    expect(t.complex.map((i) => i.title)).toEqual(['BEM à plat']);
+    expect(t.info.map((i) => i.title)).toEqual(['Remarque']);
+  });
+
+    it('une fiche simple sans mini-plan part à la planification', () => {
     const t = triage([result([issue({ classification: 'followup_simple', miniPlan: ' ' })])]);
     expect(t.simple).toEqual([]);
     expect(t.complex).toHaveLength(1);

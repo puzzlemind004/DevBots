@@ -54,11 +54,11 @@ maintenant :
 | --- | --- |
 | Source | GitHub ou Azure DevOps, dépôt ou organisation et projet, filtre de confiance |
 | Planification | Skill de planification, modèle, gabarit du plan |
-| Dev | Skill de dev, commandes autorisées, installation des dépendances, règles, branche de base, modèle |
+| Dev | Skill de dev, commandes autorisées, checks lancés par DevBots, installation des dépendances, règles, branche de base, modèle |
 | Compte rendu | Gabarit du CR |
 | Supervision | Étapes (skills ou agents), conditions, caractère bloquant, boucles de correction |
 | Revue et merge | Checks relancés au merge, commande qui sert l'application, port |
-| Poste | Agents en parallèle, notifications : paramètres utilisateur, pas le dépôt |
+| Poste | Agents en parallèle, budget par story, notifications : paramètres utilisateur, ou du dépôt si l'équipe le partage |
 
 La source se configure toujours : sans elle, rien ne s'importe.
 
@@ -69,7 +69,8 @@ Traite les domaines dans l'ordre du tableau. Pour chacun :
 1. relis sa section de [`contrat.md`](contrat.md) ;
 2. pose les questions qui fixent ses réglages, en partant de ce que l'état des
    lieux a montré (par exemple, les commandes autorisées se proposent depuis
-   les scripts réels du dépôt) ;
+   les scripts réels du dépôt, et `devbots.dev.checkCommands` depuis ses
+   commandes de build et de test complètes, cache compris) ;
 3. si le domaine a un skill, mène l'**entretien de skill** ci-dessous ;
 4. si le domaine a un gabarit, pars de celui de `defauts/` et adapte-le avec
    l'utilisateur ;
@@ -87,8 +88,16 @@ l'étape. Sinon, interroge l'utilisateur jusqu'à savoir :
 - les autres skills du dépôt à appeler, et à quel moment ;
 - ce qui distingue un bon résultat d'un mauvais pour cette équipe.
 
+Un skill existant, réutilisé ou non, se relit contre la section « Ce qu'un
+skill de … doit respecter » de son étape dans [`contrat.md`](contrat.md) :
+chemin court pour les corrections, commandes au premier plan, caches gardés,
+définition stricte du bloquant. Propose à l'utilisateur d'ajuster ce qui s'en
+écarte : c'est ce qui décide de ce que coûte une story.
+
 Rédige ensuite `.claude/skills/<nom>/SKILL.md` : la méthode seule, le contrat
-étant fourni par DevBots à chaque session. Une étape que le contrat réserve à
+étant fourni par DevBots à chaque session. Un skill de dev traite les trois
+cas d'ouverture du contrat (premier dev, reprise, corrections), chacun dans sa
+section, la section des corrections restant la plus courte. Une étape que le contrat réserve à
 DevBots (commit, pull request, merge…) n'y figure pas ; un format de sortie non
 plus, il est imposé. Donne-lui `disable-model-invocation: true` : c'est DevBots
 qui l'ouvre, par `/<nom>`. Les skills qu'il appelle passent par l'outil

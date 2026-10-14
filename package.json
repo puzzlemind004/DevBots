@@ -163,6 +163,30 @@
           "markdownDescription": "Règles de dev à donner à l'agent, relatif au dépôt (par exemple `docs/regle-dev.md`). Vide : le `CLAUDE.md` du dépôt, chargé d'office, suffit.",
           "scope": "resource"
         },
+        "devbots.dev.checkCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Commandes lancées par DevBots dans le worktree après chaque session de dev, dans l'ordre : par exemple `npx nx run-many -t build,test,lint -p mon-projet`. Le premier échec repart à l'agent avec la fin de sa sortie, sans revue. Renseignées, l'agent ne lance plus la suite complète lui-même, seulement les tests ciblés : aucun token dépensé à attendre un build. Vide : l'agent valide lui-même.",
+          "scope": "resource"
+        },
+        "devbots.dev.correctionMaxTurns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500,
+          "default": 40,
+          "markdownDescription": "Plafond de tours d'une session de correction (`--max-turns`). Au-delà, la story est bloquée et te revient. 0 : aucun plafond.",
+          "scope": "resource"
+        },
+        "devbots.agents.storyBudgetUsd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 10,
+          "markdownDescription": "Budget d'une story, en dollars estimés par Claude Code, toutes sessions comprises (dev, revue, supervision, corrections). Sur abonnement, c'est la mesure de ce que la story prend sur ton quota. Atteint, la story est bloquée avant la session suivante ; la relancer lui rouvre un budget. 0 : aucun budget.",
+          "scope": "resource"
+        },
         "devbots.git.baseBranch": {
           "type": "string",
           "default": "",
@@ -185,8 +209,8 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 10,
-          "default": 3,
-          "markdownDescription": "Nombre maximal de boucles de correction (revue du CR ou supervision) avant que la story te revienne. `maxLoops` de `.work/supervision.json` est prioritaire.",
+          "default": 2,
+          "markdownDescription": "Nombre maximal de boucles de correction (revue du CR ou supervision) avant que la story te revienne. Chaque boucle ne revérifie que les points demandés, sur le diff de la correction. `maxLoops` de `.work/supervision.json` est prioritaire.",
           "scope": "resource"
         },
         "devbots.merge.checkCommands": {

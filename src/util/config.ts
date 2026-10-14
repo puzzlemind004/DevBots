@@ -39,6 +39,9 @@ export interface DevBotsConfig {
   devAllowedCommands: string[];
   devInstallCommand: string;
   devRulesFile: string;
+  devCheckCommands: string[];
+  devCorrectionMaxTurns: number;
+  storyBudgetUsd: number;
   gitBaseBranch: string;
   worktreeRoot: string;
   supervisionModel: string;
@@ -74,10 +77,13 @@ export function readConfig(scope?: vscode.Uri): DevBotsConfig {
     devAllowedCommands: cfg.get<string[]>('dev.allowedCommands', DEFAULT_ALLOWED_COMMANDS),
     devInstallCommand: cfg.get<string>('dev.installCommand', '').trim(),
     devRulesFile: cfg.get<string>('dev.rulesFile', '').trim(),
+    devCheckCommands: cfg.get<string[]>('dev.checkCommands', []).map((c) => c.trim()).filter(Boolean),
+    devCorrectionMaxTurns: cfg.get<number>('dev.correctionMaxTurns', 40),
+    storyBudgetUsd: cfg.get<number>('agents.storyBudgetUsd', 10),
     gitBaseBranch: cfg.get<string>('git.baseBranch', '').trim(),
     worktreeRoot: cfg.get<string>('worktrees.root', '').trim(),
     supervisionModel: cfg.get<string>('supervision.model', 'opus').trim(),
-    supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 3),
+    supervisionMaxLoops: cfg.get<number>('supervision.maxLoops', 2),
     mergeCheckCommands: cfg.get<string[]>('merge.checkCommands', []).map((c) => c.trim()).filter(Boolean),
     reviewServeCommand: cfg.get<string>('review.serveCommand', 'npx ng serve --port {port}').trim(),
     reviewBasePort: cfg.get<number>('review.basePort', 4201),

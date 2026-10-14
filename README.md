@@ -40,13 +40,14 @@ Ce qui marche aujourd'hui :
   l'extension ;
 - revue du CR, étapes de supervision du dépôt (`.work/supervision.json`,
   pre-pr-check par défaut), tri des problèmes en fiches `LOCAL-<n>`, boucle de
-  correction plafonnée, jusqu'à « À valider » (voir
+  correction plafonnée (agent neuf, revue des seuls points demandés), budget
+  par story, jusqu'à « À valider » (voir
   [Dev et supervision](docs/dev-et-supervision.md)) ;
 - `.work/state.json`, barre d'état des agents, notifications, reprise après
   un redémarrage ;
 - carte « À valider » : diff natif fichier par fichier, worktree dans une
   nouvelle fenêtre ou l'espace de travail, application sur un port propre au
-  worktree, retours renvoyés à l'agent dans sa session ;
+  worktree, retours renvoyés à un agent neuf ;
 - feu vert : merge séquentiel dans la branche de la feature, intégration de la
   feature si elle a avancé, checks, conflit renvoyé à l'agent, suppression du
   worktree et de la branche, fiche dans Done (voir
@@ -100,10 +101,13 @@ npm run package # vérifications, build, puis devbots-<version>.vsix
 | `devbots.dev.allowedCommands` | Commandes que l'agent de dev peut lancer, par préfixe |
 | `devbots.dev.installCommand` | Installation des dépendances d'un worktree ; vide : détectée, `none` : aucune |
 | `devbots.dev.rulesFile` | Règles de dev données à l'agent ; vide : le `CLAUDE.md` suffit |
+| `devbots.dev.checkCommands` | Build et tests lancés par DevBots après chaque session de dev ; vide : l'agent valide lui-même |
+| `devbots.dev.correctionMaxTurns` | Plafond de tours d'une session de correction, 40 par défaut |
+| `devbots.agents.storyBudgetUsd` | Budget estimé d'une story, toutes sessions comprises, 10 $ par défaut ; `0` : aucun |
 | `devbots.git.baseBranch` | Départ des branches de feature ; vide : la branche courante |
 | `devbots.worktrees.root` | Dossier des worktrees ; vide : `<dépôt>.worktrees` |
 | `devbots.supervision.model` | Modèle de la revue du CR et des étapes, `opus` par défaut |
-| `devbots.supervision.maxLoops` | Plafond de boucles de correction, sauf `maxLoops` de `supervision.json` |
+| `devbots.supervision.maxLoops` | Plafond de boucles de correction (2 par défaut), sauf `maxLoops` de `supervision.json` |
 | `devbots.merge.checkCommands` | Commandes relancées au merge quand la feature a avancé ; vide : aucune |
 | `devbots.review.serveCommand` | Lance l'application d'un worktree en revue, `{port}` compris |
 | `devbots.review.basePort` | Premier port des worktrees en revue, 4201 par défaut |
@@ -142,7 +146,7 @@ ni dans `.work`.
 | DevBots : personnaliser les gabarits | Dépose les gabarits par défaut du plan et du CR dans `.work/templates/`, sans écraser ceux qui existent, et les ouvre |
 | DevBots : lancer le dev | Met une story de Ready en file, avec le modèle choisi (aussi : ▶ sur la story) |
 | DevBots : arrêter l'agent | Interrompt l'agent ; la story passe bloquée |
-| DevBots : relancer la story | Remet en file une story bloquée ; l'agent reprend sa session |
+| DevBots : relancer la story | Remet en file une story bloquée, budget rouvert ; un agent neuf reprend le worktree |
 | DevBots : retirer du flux de dev | Rend à Ready une story en file, bloquée ou à valider ; worktree et branche restent |
 | DevBots : journal de l'agent | Le journal de la story, en direct |
 | DevBots : compte rendu de dev | Le CR de la story |
@@ -157,7 +161,7 @@ ni dans `.work`.
 | DevBots : voir le diff | Story à valider, bloquée ou mergée : ses changements dans la vue diff native |
 | DevBots : ouvrir le worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |
 | DevBots : lancer l'application | `devbots.review.serveCommand` dans un terminal, sur le port du worktree |
-| DevBots : écrire à l'agent | Tes retours, ou ta réponse à un blocage, repartent dans sa session ; la story repasse par la revue |
+| DevBots : écrire à l'agent | Tes retours, ou ta réponse à un blocage, repartent à un agent neuf ; la story repasse par la revue |
 | DevBots : feu vert (merge) | Merge dans la branche de la feature, nettoyage, fiche dans Done |
 
 ## Documentation

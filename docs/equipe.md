@@ -169,7 +169,7 @@ Les erreurs d'une commande que tu lances s'affichent toujours.
 | « Claude Code introuvable » ou « trop ancien » | `claude --version` dans un terminal ; sinon `devbots.claude.executable` vers le bon chemin. « DevBots : vérifier l'installation de Claude Code » reteste |
 | Les agents consomment un crédit d'API | Ils ne le peuvent pas : vérifie `claude` → `/status`, connecté par abonnement |
 | Import Azure DevOps refusé (401) | PAT expiré ou sans la portée Work Items : réenregistre-le |
-| Une story reste bloquée | Clic sur la story → journal de l'agent ; « Relancer » reprend sa session |
+| Une story reste bloquée | Clic sur la story → journal de l'agent ; « Relancer » fait repartir un agent neuf du worktree |
 | Une commande de l'agent est refusée | Elle n'est pas dans `devbots.dev.allowedCommands` : ajoute-la au dépôt si elle doit l'être |
 | Le port de l'application est pris | `devbots.review.basePort`, ou ferme l'application d'une revue précédente |
 | VS Code fermé pendant un dev | Au redémarrage, les stories interrompues sont proposées à la relance ; leur worktree est intact |

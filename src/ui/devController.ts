@@ -543,8 +543,8 @@ export class DevController implements vscode.Disposable {
     const feedback = await vscode.window.showInputBox({
       title: `${blocked ? 'Réponse' : 'Retours'} pour ${run.storyId} — ${run.title}`,
       prompt: blocked
-        ? `Bloquée : ${run.reason ?? 'sans raison donnée'} — Ta réponse part à l'agent, dans sa session, et la story reprend.`
-        : "Tes remarques partent à l'agent, dans sa session. La story repasse en dev, puis par la revue du CR et la supervision.",
+        ? `Bloquée : ${run.reason ?? 'sans raison donnée'} — Ta réponse part à un agent neuf, avec la raison du blocage, et la story reprend.`
+        : "Tes remarques partent à un agent neuf. La story repasse en dev, puis par la revue du CR et la supervision.",
       placeHolder: blocked
         ? 'Par exemple : j’ai installé les dépendances, relance les tests.'
         : 'Par exemple : le message d’erreur doit citer le champ fautif.',
@@ -571,8 +571,8 @@ export class DevController implements vscode.Disposable {
    * Reprend la session de l'agent de dev dans Claude Code, avec toute sa
    * conversation : `claude --resume` dans un terminal ouvert sur le worktree,
    * en onglet d’éditeur. Tu y travailles sous tes propres permissions. La
-   * story ne bouge pas : « Relancer » ou tes retours la font repartir dans
-   * cette même session, votre échange compris.
+   * story ne bouge pas : « Relancer » ou tes retours font repartir un agent
+   * neuf, qui retrouve ce qui a changé dans le worktree, pas la conversation.
    *
    * Le panneau de l'extension Claude Code ne retrouve pas ces sessions : nées
    * de `claude -p` dans le worktree, elles n'apparaissent pas dans sa liste,
@@ -609,7 +609,7 @@ export class DevController implements vscode.Disposable {
     terminal.sendText(`${/\s/.test(exe) ? `"${exe}"` : exe} --resume ${run.devSessionId}`);
     vscode.window.showInformationMessage(
       run.status === 'blocked'
-        ? `DevBots ne lit pas cet échange : la story reste bloquée. Ferme le terminal une fois fini, il te proposera de relancer ${run.storyId} dans cette même session, votre échange compris.`
+        ? `DevBots ne lit pas cet échange : la story reste bloquée. Ferme le terminal une fois fini, il te proposera de relancer ${run.storyId}. L'agent qui repartira sera neuf : il verra ce qui a changé dans le worktree, pas votre conversation ; ce qui doit le guider, mets-le dans « Écrire à l'agent ».`
         : `Ce que l'agent change pendant l'échange part avec la story à ton feu vert. Pour refaire passer revue et supervision, écris-lui depuis le clic droit.`
     );
   }
@@ -860,7 +860,10 @@ export class DevController implements vscode.Disposable {
           rulesFile: c.devRulesFile,
           reviewModel: c.supervisionModel,
           maxLoops: c.supervisionMaxLoops,
-          mergeChecks: c.mergeCheckCommands
+          mergeChecks: c.mergeCheckCommands,
+          checkCommands: c.devCheckCommands,
+          correctionMaxTurns: c.devCorrectionMaxTurns,
+          storyBudgetUsd: c.storyBudgetUsd
         };
       },
       onJournal: (storyId, line) => {
@@ -985,7 +988,7 @@ export class DevController implements vscode.Disposable {
       return;
     }
     const chosen = await vscode.window.showInformationMessage(
-      `Discussion avec l'agent de ${storyId} fermée. La story est toujours bloquée : la relancer pour que l'agent reprenne, votre échange compris ?`,
+      `Discussion avec l'agent de ${storyId} fermée. La story est toujours bloquée : la relancer ? Un agent neuf repartira du worktree tel que vous l'avez laissé.`,
       'Relancer'
     );
     if (chosen === 'Relancer') {
@@ -994,7 +997,7 @@ export class DevController implements vscode.Disposable {
   }
 
   /**
-   * Avant une relance ou une réponse : deux Claude sur la même session se
+   * Avant une relance ou une réponse : deux Claude dans le même worktree se
    * marcheraient dessus. Rend faux si la discussion reste ouverte.
    */
   private async closeAgentDiscussion(storyId: string): Promise<boolean> {
@@ -1004,7 +1007,7 @@ export class DevController implements vscode.Disposable {
     }
     const close = 'Fermer la discussion et continuer';
     const chosen = await vscode.window.showWarningMessage(
-      `La discussion avec l'agent de ${storyId} est encore ouverte dans un terminal, sur la même session. Elle doit être fermée avant que l'agent reparte.`,
+      `La discussion avec l'agent de ${storyId} est encore ouverte dans un terminal, sur le même worktree. Elle doit être fermée avant que l'agent reparte.`,
       { modal: true },
       close
     );

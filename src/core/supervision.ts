@@ -56,7 +56,7 @@ export const DEFAULT_STEP: SupervisionStep = {
 /** Le fichier déposé par « personnaliser la supervision ». */
 export const DEFAULT_SUPERVISION_FILE = `${JSON.stringify(
   {
-    maxLoops: 3,
+    maxLoops: 2,
     steps: [
       { name: 'pre-pr-check', skill: 'pre-pr-check', blocking: true },
       {
@@ -262,7 +262,7 @@ export const ISSUES_SCHEMA = {
             type: 'string',
             enum: ['blocking', 'followup_complex', 'followup_simple', 'none'],
             description:
-              'blocking : à corriger dans cette story. followup_complex : fiche séparée à planifier. followup_simple : fiche séparée prête, avec un mini-plan. none : information.'
+              "blocking : empêche de livrer la story (critère du plan non couvert, bug, régression, build ou tests cassés, faille), à corriger dans cette story ; une convention de style ou de documentation n'est jamais bloquante, sauf si le plan l'exige. followup_complex : fiche séparée à planifier. followup_simple : fiche séparée prête, avec un mini-plan. none : information."
           },
           mini_plan: {
             type: 'string',
@@ -282,6 +282,8 @@ export interface CrReview {
   verdict: 'approved' | 'changes_requested';
   summary: string;
   corrections: Array<{ description: string; location: string }>;
+  /** Faite par les contrôles automatiques de l'extension, sans appel à Claude. */
+  automatic?: boolean;
 }
 
 export type IssueClass = 'blocking' | 'followup_complex' | 'followup_simple' | 'none';
@@ -374,9 +376,29 @@ export interface Triage {
 }
 
 /**
+ * Un problème retient-il la story ? Il faut qu'il soit classé bloquant, d'une
+ * étape bloquante, et d'une gravité qui le justifie : un problème mineur ne
+ * relance jamais une boucle de correction, quel que soit son classement.
+ */
+export function holdsStory(result: StepResult, issue: Issue): boolean {
+  return (
+    result.blocking &&
+    issue.classification === 'blocking' &&
+    (issue.severity === 'blocking' || issue.severity === 'major')
+  );
+}
+
+/** Les problèmes d'une étape qui retiennent la story. */
+export function blockingIssues(result: StepResult): Issue[] {
+  return result.issues.filter((issue) => holdsStory(result, issue));
+}
+
+/**
  * Range les problèmes des étapes. Un problème bloquant d'une étape non
- * bloquante devient une fiche à planifier : il ne retient pas la story.
- * Une fiche simple sans mini-plan est traitée comme complexe.
+ * bloquante devient une fiche à planifier : il ne retient pas la story. Un
+ * problème classé bloquant mais de gravité mineure devient une fiche de suivi,
+ * ou une simple information s'il n'est qu'informatif. Une fiche simple sans
+ * mini-plan est traitée comme complexe.
  */
 export function triage(results: StepResult[]): Triage {
   const out: Triage = { blocking: [], complex: [], simple: [], info: [] };
@@ -384,7 +406,13 @@ export function triage(results: StepResult[]): Triage {
     for (const issue of result.issues) {
       switch (issue.classification) {
         case 'blocking':
-          (result.blocking ? out.blocking : out.complex).push(issue);
+          if (holdsStory(result, issue)) {
+            out.blocking.push(issue);
+          } else if (issue.severity === 'info') {
+            out.info.push(issue);
+          } else {
+            (result.blocking && issue.miniPlan.trim() ? out.simple : out.complex).push(issue);
+          }
           break;
         case 'followup_complex':
           out.complex.push(issue);
@@ -495,6 +523,8 @@ export interface ReportInput {
   /** Identifiants des fiches créées par le tri. */
   followUps: string[];
   loops: number;
+  /** Coût estimé des sessions depuis le lancement. */
+  costUsd?: number;
 }
 
 const CHECK_LABELS: Record<CheckStatus, string> = {
@@ -513,7 +543,9 @@ export function renderReport(input: ReportInput): string {
       `- Build : ${CHECK_LABELS[input.dev.build]}`,
       `- Tests : ${CHECK_LABELS[input.dev.tests]}${input.dev.testsDetail ? ` — ${input.dev.testsDetail}` : ''}`,
       `- Lint : ${CHECK_LABELS[input.dev.lint]}`,
+      ...(input.dev.checks ?? []).map((c) => `- Check \`${c.command}\` : ${c.passed ? 'OK' : 'en échec'}`),
       `- Boucles de correction : ${input.loops}`,
+      ...(input.costUsd ? [`- Coût estimé : ${input.costUsd.toFixed(2)} $`] : []),
       ''
     );
   }

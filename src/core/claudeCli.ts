@@ -105,6 +105,8 @@ export interface ClaudeRequest {
   disallowedTools?: readonly string[];
   /** Agent de `.claude/agents/` qui mène la session. */
   agent?: string;
+  /** Plafond de tours de la session (`--max-turns`). Absent : aucun. */
+  maxTurns?: number;
   appendSystemPrompt?: string;
   signal?: AbortSignal;
 }
@@ -140,7 +142,9 @@ export type StreamEvent =
 export class ClaudeError extends Error {
   constructor(
     message: string,
-    readonly cancelled = false
+    readonly cancelled = false,
+    /** Ce que la session a coûté avant d'échouer, quand le CLI le dit. */
+    readonly costUsd?: number
   ) {
     super(message);
     this.name = 'ClaudeError';
@@ -167,6 +171,9 @@ export function buildClaudeArgs(request: ClaudeRequest, stream = false): string[
   }
   if (request.agent) {
     args.push('--agent', request.agent);
+  }
+  if (request.maxTurns && request.maxTurns > 0) {
+    args.push('--max-turns', String(request.maxTurns));
   }
   args.push('--tools', request.tools.join(','));
   // Une règle par argument : une règle peut contenir des espaces.
@@ -197,9 +204,14 @@ export function parseClaudeResult(stdout: string): ClaudeResponse {
   } catch {
     throw new ClaudeError(`Réponse illisible de Claude Code : ${truncate(stdout, 300)}`);
   }
+  const costUsd = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined;
+  if (result.subtype === 'error_max_turns') {
+    const turns = typeof result.num_turns === 'number' ? ` (${result.num_turns} tours)` : '';
+    throw new ClaudeError(`Claude Code a atteint son plafond de tours${turns} sans finir.`, false, costUsd);
+  }
   if (result.is_error === true || (result.subtype && result.subtype !== 'success')) {
     const detail = typeof result.result === 'string' && result.result ? result.result : String(result.subtype);
-    throw new ClaudeError(`Claude Code a échoué : ${truncate(detail, 500)}`);
+    throw new ClaudeError(`Claude Code a échoué : ${truncate(detail, 500)}`, false, costUsd);
   }
   if (typeof result.session_id !== 'string') {
     throw new ClaudeError('Réponse de Claude Code sans identifiant de session.');
@@ -210,7 +222,7 @@ export function parseClaudeResult(stdout: string): ClaudeResponse {
   return {
     sessionId: result.session_id,
     output: result.structured_output,
-    costUsd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined,
+    costUsd,
     permissionDenials: readDenials(result.permission_denials)
   };
 }

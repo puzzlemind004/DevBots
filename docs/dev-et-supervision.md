@@ -25,7 +25,8 @@ choisir un autre.
 3. **Dev.** `claude -p` dans le worktree, avec ton skill de dev
    (`devbots.dev.skill`). L'agent implémente, lance build et tests, rédige le
    CR dans `.devbots/cr.md`. Il ne commite pas : l'extension commite son
-   travail à la fin de la session.
+   travail à la fin de la session, puis lance les checks de
+   `devbots.dev.checkCommands` s'il y en a.
 4. **Revue du CR.** Session neuve, en lecture seule, avec le plan, le CR et le
    diff. Réponse : approuvé, ou corrections bloquantes.
 5. **Supervision.** Les étapes de `.work/supervision.json`, dans l'ordre,
@@ -38,17 +39,52 @@ choisir un autre.
 
 ## Boucle de correction
 
-Les corrections bloquantes (revue du CR, étape bloquante) repartent à l'agent
-de dev, dans **sa** session (`--resume`), avec ces seuls retours. Puis revue
-et supervision recommencent, dans des sessions neuves.
+Les corrections bloquantes (revue du CR, étape bloquante) repartent à un
+agent de dev **neuf**. Tout ce qu'il lui faut est dans le worktree, déjà
+commité, et dans `.devbots/` : `corrections.md`, le CR, la fiche, le diff.
+Reprendre la session du premier dev coûterait tout son historique à chaque
+tour, pour corriger quelques lignes. La session de correction est plafonnée
+à `devbots.dev.correctionMaxTurns` tours.
+
+La revue qui suit ne relit pas toute la story : la relecture complète a déjà
+eu lieu.
+
+- Un CR déjà approuvé ne repasse pas en revue. Un CR refusé n'est revu que
+  sur les points demandés.
+- Une étape sans problème bloquant garde ses résultats sans être relancée.
+- Une étape qui en avait vérifie ces seuls problèmes sur
+  `.devbots/fix.patch`, le diff de la correction, sans son skill. Elle ne
+  peut y ajouter qu'une régression introduite par la correction.
 
 Sans appel à Claude, l'extension renvoie aussi directement à l'agent : un
-build ou des tests qu'il déclare en échec, un CR absent, un commit refusé par
-un hook du dépôt.
+check de `devbots.dev.checkCommands` en échec, avec la fin de sa sortie (sans
+checks : un build ou des tests que l'agent déclare en échec), un CR absent,
+un commit refusé par un hook du dépôt.
 
 Au-delà de `maxLoops` boucles (`.work/supervision.json`, sinon
-`devbots.supervision.maxLoops`), la story passe bloquée et te revient. Les
-corrections en suspens sont gardées : « Relancer » les renvoie à l'agent.
+`devbots.supervision.maxLoops`, 2 par défaut), la story passe bloquée et te
+revient. Les corrections en suspens et ce qu'elles doivent vérifier sont
+gardés : « Relancer » les renvoie à un agent neuf.
+
+## Ce que coûte une story
+
+Trois garde-fous tiennent la consommation, sans dépendre des skills :
+
+- **Budget** (`devbots.agents.storyBudgetUsd`, 10 $ par défaut) : le coût
+  estimé de toutes les sessions de la story est cumulé ; atteint, la story
+  est bloquée avant la session suivante. « Relancer » lui rouvre un budget.
+  Sur abonnement, ce coût mesure ce que la story prend sur ton quota. Le
+  rapport de supervision l'indique.
+- **Checks par l'extension** (`devbots.dev.checkCommands`) : build et tests
+  complets tournent hors de Claude, après la session. L'agent ne lance plus
+  que les tests ciblés, au lieu de surveiller un long build tour après tour.
+- **Problèmes mineurs** : un problème classé `blocking` mais de gravité
+  `minor` devient une fiche de suivi. Une convention de style ou de
+  documentation ne relance jamais une boucle de correction.
+
+Chaque session de dev reçoit en plus ces consignes : build et tests au
+premier plan, jamais en tâche de fond ; une commande simple par appel Bash,
+sans `cd`.
 
 ## Ordonnancement
 
@@ -96,6 +132,8 @@ l'étape ajoute avec `tools`.
 | `cr-template.md` | Le gabarit de CR du dépôt, titre et identifiant remplis |
 | `cr.md` | Le CR, écrit par l'agent |
 | `diff-stat.txt`, `diff.patch` | Le diff de la story, pour la revue et la supervision |
+| `corrections.md` | Les corrections de la dernière boucle, pour l'agent qui les traite |
+| `fix.patch` | Pendant une boucle : le diff de la correction seule, que la revue vérifie |
 | `installed` | Marque une installation des dépendances réussie |
 
 Le dossier est exclu de git par `info/exclude`, partagé par tous les worktrees
@@ -107,7 +145,7 @@ du dépôt : rien n'est ajouté au `.gitignore` versionné.
 
 ```json
 {
-  "maxLoops": 3,
+  "maxLoops": 2,
   "steps": [
     { "name": "pre-pr-check", "skill": "pre-pr-check", "blocking": true },
     {
@@ -141,7 +179,9 @@ il peut venir d'un plugin ou de ton dossier utilisateur.
 
 | Classement | Effet |
 | --- | --- |
-| `blocking`, d'une étape bloquante | Repart à l'agent de dev |
+| `blocking`, gravité `blocking` ou `major`, d'une étape bloquante | Repart à l'agent de dev |
+| `blocking`, gravité `minor` | Fiche de suivi, comme un `followup_simple` |
+| `blocking`, gravité `info` | Rapport seulement |
 | `blocking`, d'une étape non bloquante | Fiche à planifier dans `new/` |
 | `followup_complex` | Fiche à planifier dans `new/` |
 | `followup_simple`, avec un mini-plan | Fiche prête dans `ready/`, modèle `haiku` |
@@ -158,8 +198,9 @@ Ready ou l'inverse, avant qu'elle parte en dev.
 ## `.work/state.json` et `.work/runs/<id>/`
 
 `state.json` tient le parcours de chaque story partie en dev : état, modèle,
-branches, worktree, session de l'agent, boucles, dernier statut de build et de
-tests, fiches créées par le tri, et tes arbitrages sur les dépendances. Les
+branches, worktree, dernière session de l'agent, boucles, ce que la boucle en
+cours doit vérifier, coût estimé, dernier statut de build et de tests et des
+checks, fiches créées par le tri, et tes arbitrages sur les dépendances. Les
 dossiers restent la source de vérité pour New, Ready et Done.
 
 | État | Groupe du panneau |
@@ -182,11 +223,13 @@ dossiers restent la source de vérité pour New, Ready et Done.
 
 - « Arrêter l'agent » interrompt le processus : la story passe bloquée, son
   worktree intact.
-- « Relancer » la remet en file, compteur de boucles à zéro. L'agent reprend
-  sa session et le travail en cours du worktree.
-- « Écrire à l'agent » (clic droit) fait de même avec ta réponse à son blocage, qu'il
-  reçoit dans sa session avec la raison du blocage et les corrections en
-  suspens. La notification de blocage propose aussi « Répondre ».
+- « Relancer » la remet en file, compteur de boucles et budget à zéro. Un
+  agent neuf reprend le travail en cours du worktree, ou les corrections en
+  suspens.
+- « Écrire à l'agent » (clic droit) fait de même avec ta réponse à son
+  blocage, qu'un agent neuf reçoit avec la raison du blocage et les
+  corrections en suspens. La notification de blocage propose aussi
+  « Répondre ».
 - « Discuter avec l'agent dans Claude Code » (💬, ou « Discuter » dans la
   notification) rouvre sa session, toute sa conversation comprise, par
   `claude --resume` dans un terminal du worktree, en onglet. Le fermer n’arrête que ce Claude-là : un nouveau clic reprend la conversation. Le panneau de
@@ -194,10 +237,11 @@ dossiers restent la source de vérité pour New, Ready et Done.
   `claude -p`.
   Tu y travailles sous tes propres permissions : tu peux lui faire lancer
   `npm ci`, par exemple. DevBots ne lit pas cet échange : la story reste
-  bloquée. À la fermeture du terminal, il propose « Relancer », qui fait
-  repartir l'agent dans cette même session, votre échange compris. Relancer
-  ou répondre pendant que la discussion est ouverte demande d'abord de la
-  fermer : deux Claude sur une même session se marcheraient dessus.
+  bloquée. À la fermeture du terminal, il propose « Relancer » : un agent
+  neuf repart du worktree tel que vous l'avez laissé, sans votre
+  conversation. Ce qui doit le guider passe par « Écrire à l'agent ».
+  Relancer ou répondre pendant que la discussion est ouverte demande d'abord
+  de la fermer : deux Claude dans un même worktree se marcheraient dessus.
 - « Ouvrir le worktree » (📂 sur une story bloquée, clic droit sur toute
   story en dev) l'ouvre dans une nouvelle fenêtre, un terminal,
   l'explorateur de fichiers ou l'espace de travail.

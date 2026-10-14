@@ -22,6 +22,8 @@ class FakeClaude {
   readonly review: Handler[] = [];
   readonly steps: Handler[] = [];
   private sessions = 0;
+  /** Coût rendu par chaque session. */
+  cost = 0;
 
   readonly run = async (request: ClaudeStreamRequest): Promise<ClaudeResponse> => {
     this.requests.push(request);
@@ -33,7 +35,12 @@ class FakeClaude {
     }
     request.onEvent({ kind: 'text', text: 'Je travaille.' });
     const output = await handler(request);
-    return { sessionId: request.resume ?? `session-${++this.sessions}`, output, permissionDenials: [] };
+    return {
+      sessionId: request.resume ?? `session-${++this.sessions}`,
+      output,
+      costUsd: this.cost || undefined,
+      permissionDenials: []
+    };
   };
 }
 
@@ -123,7 +130,10 @@ describe('Orchestrator', () => {
       rulesFile: '',
       reviewModel: 'opus',
       maxLoops: 2,
-      mergeChecks: []
+      mergeChecks: [],
+      checkCommands: [],
+      correctionMaxTurns: 40,
+      storyBudgetUsd: 0
     };
     store = new FlowStateStore(path.join(work, 'state.json'));
     orchestrator = new Orchestrator({
@@ -249,7 +259,7 @@ describe('Orchestrator', () => {
     expect(events).toContainEqual({ kind: 'awaitingHuman', storyId: '42', title: 'Story 42' });
   });
 
-  it("renvoie les corrections à l'agent dans sa session, puis relit dans une session neuve", async () => {
+  it("renvoie les corrections à un agent neuf, puis relit dans une session neuve", async () => {
     await addReady('42', ['src/email.ts']);
     claude.dev.push(devWrites('src/email.ts'), devWrites('src/email.ts', 'export const ok = 1;\n'));
     claude.review.push(
@@ -263,8 +273,11 @@ describe('Orchestrator', () => {
 
     const devs = claude.requests.filter((r) => r.schema === DEV_SCHEMA);
     expect(devs).toHaveLength(2);
-    expect(devs[1]!.resume).toBe('session-1');
+    expect(devs[1]!.resume).toBeUndefined();
+    expect(devs[1]!.maxTurns).toBe(40);
+    expect(devs[1]!.prompt.startsWith('/dev-story\n')).toBe(true);
     expect(devs[1]!.prompt).toContain('- Couvrir C2 (CR)');
+    expect(devs[1]!.prompt).toContain('Session neuve');
     const reviews = claude.requests.filter((r) => r.schema === REVIEW_SCHEMA);
     expect(reviews.every((r) => r.resume === undefined)).toBe(true);
 
@@ -325,8 +338,152 @@ describe('Orchestrator', () => {
     await orchestrator.retry('42');
     expect(await settle('42')).toBe('awaiting_human');
     const resumed = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
-    expect(resumed.resume).toBe('session-1');
+    expect(resumed.resume).toBeUndefined();
     expect(resumed.prompt).toContain('Fuite (src/email.ts:3)');
+    // La relance vérifie la correction : le CR, déjà approuvé, ne repasse pas en revue.
+    expect(claude.requests.filter((r) => r.schema === REVIEW_SCHEMA)).toHaveLength(1);
+    expect(claude.requests.at(-1)!.prompt).toContain('vérification des corrections');
+  });
+
+  const FUITE = {
+    title: 'Fuite',
+    description: 'Abonnement jamais fermé.',
+    severity: 'blocking',
+    file: 'src/email.ts',
+    line: 3,
+    classification: 'blocking',
+    mini_plan: ''
+  };
+
+  it('après une correction, ne revérifie que les problèmes bloquants, sur le diff de la correction', async () => {
+    await addReady('42', ['src/email.ts']);
+    await fs.writeFile(
+      path.join(work, 'supervision.json'),
+      JSON.stringify({ steps: [{ skill: 'pre-pr-check' }, { name: 'securite', skill: 'secu' }] }),
+      'utf8'
+    );
+    const suivi = {
+      title: 'Revoir la validation',
+      description: 'À part.',
+      severity: 'major',
+      file: '',
+      line: 0,
+      classification: 'followup_complex',
+      mini_plan: ''
+    };
+    claude.dev.push(devWrites('src/email.ts'), devWrites('src/email.ts', 'export const ok = 1;\n'));
+    claude.review.push(approved);
+    claude.steps.push(() => ({ summary: '', issues: [FUITE, suivi] }), noIssues, () => ({ summary: 'Corrigé.', issues: [] }));
+
+    await orchestrator.enqueue('42', 'sonnet');
+    expect(await settle('42')).toBe('awaiting_human');
+
+    // Le CR, déjà approuvé, ne repasse pas ; l'étape sans bloquant non plus.
+    expect(claude.requests.map((r) => r.schema)).toEqual([
+      DEV_SCHEMA,
+      REVIEW_SCHEMA,
+      ISSUES_SCHEMA,
+      ISSUES_SCHEMA,
+      DEV_SCHEMA,
+      ISSUES_SCHEMA
+    ]);
+    const verification = claude.requests[5]!;
+    expect(verification.prompt.startsWith('/')).toBe(false);
+    expect(verification.prompt).toContain('vérification des corrections');
+    expect(verification.prompt).toContain('Fuite (src/email.ts:3)');
+    expect(verification.prompt).toContain('.devbots/fix.patch');
+
+    const run = (await store.read()).stories['42']!;
+    const devbots = path.join(run.worktree, '.devbots');
+    const fix = await fs.readFile(path.join(devbots, 'fix.patch'), 'utf8');
+    expect(fix).toContain('+export const ok = 1;');
+    expect(fix).not.toContain('+export const ok = true;');
+    expect(await fs.readFile(path.join(devbots, 'corrections.md'), 'utf8')).toContain('Fuite');
+    // Le suivi trouvé au premier passage est bien trié.
+    expect(run.followUps).toEqual(['LOCAL-1']);
+    expect(run.verification).toBeUndefined();
+  });
+
+  it('ne relance pas de boucle pour un problème bloquant de gravité mineure', async () => {
+    await addReady('42', ['src/email.ts']);
+    claude.dev.push(devWrites('src/email.ts'));
+    claude.review.push(approved);
+    claude.steps.push(() => ({
+      summary: '',
+      issues: [{ ...FUITE, title: 'Lien manquant dans la doc', severity: 'minor', mini_plan: '1. Ajouter le lien.' }]
+    }));
+
+    await orchestrator.enqueue('42', 'sonnet');
+    expect(await settle('42')).toBe('awaiting_human');
+    expect(claude.requests.filter((r) => r.schema === DEV_SCHEMA)).toHaveLength(1);
+    expect((await store.read()).stories['42']!.followUps).toEqual(['LOCAL-1']);
+    await expect(fs.access(path.join(work, 'ready', 'LOCAL-1-lien-manquant-dans-la-doc.md'))).resolves.toBeUndefined();
+  });
+
+  it("lance les checks après la session, et renvoie un échec à l'agent sans revue", async () => {
+    await addReady('42', ['src/email.ts']);
+    const checks: string[] = [];
+    orchestrator = new Orchestrator({
+      repoRoot: repo,
+      workDir: new WorkDir(work),
+      store,
+      stream: claude.run,
+      settings: () => settings,
+      check: async (_dir, command) => {
+        checks.push(command);
+        if (checks.length === 1) {
+          throw new Error('erreur TS2345');
+        }
+      }
+    });
+    settings.checkCommands = ['npm run build', 'npm test'];
+    claude.dev.push(devWrites('src/email.ts'), async (r) => ({
+      ...((await devWrites('src/email.ts', 'export const ok = 1;\n')(r)) as object),
+      build: 'not_run',
+      tests: 'failed'
+    }));
+    claude.review.push(approved);
+    claude.steps.push(noIssues);
+
+    await orchestrator.enqueue('42', 'sonnet');
+    expect(await settle('42')).toBe('awaiting_human');
+
+    // Le premier échec arrête la série ; les checks font foi sur le statut déclaré.
+    expect(checks).toEqual(['npm run build', 'npm run build', 'npm test']);
+    expect(claude.requests.map((r) => r.schema)).toEqual([DEV_SCHEMA, DEV_SCHEMA, REVIEW_SCHEMA, ISSUES_SCHEMA]);
+    const [first, second] = claude.requests;
+    expect(first!.prompt).toContain('DevBots lance lui-même : npm run build, npm test');
+    expect(first!.appendSystemPrompt).toContain('jamais en tâche de fond');
+    expect(second!.prompt).toContain('« npm run build » échoue');
+    expect(second!.prompt).toContain('erreur TS2345');
+    expect((await store.read()).stories['42']!.lastDev!.checks).toEqual([
+      { command: 'npm run build', passed: true },
+      { command: 'npm test', passed: true }
+    ]);
+  });
+
+  it('bloque une story qui a épuisé son budget, et la relance lui en rouvre un', async () => {
+    await addReady('42', ['src/email.ts']);
+    settings.storyBudgetUsd = 1;
+    claude.cost = 0.6;
+    claude.dev.push(devWrites('src/email.ts'));
+    claude.review.push(approved);
+
+    await orchestrator.enqueue('42', 'sonnet');
+    expect(await settle('42', 'blocked')).toBe('blocked');
+    const blocked = (await store.read()).stories['42']!;
+    expect(blocked.reason).toContain('Budget de 1 $ atteint (1.20 $');
+    // Dev puis revue du CR : l'étape suivante n'a pas été lancée.
+    expect(claude.requests.map((r) => r.schema)).toEqual([DEV_SCHEMA, REVIEW_SCHEMA]);
+
+    claude.cost = 0;
+    claude.dev.push(devWrites('src/email.ts'));
+    claude.review.push(approved);
+    claude.steps.push(noIssues);
+    await orchestrator.retry('42');
+    expect(await settle('42')).toBe('awaiting_human');
+    expect((await store.read()).stories['42']!.costUsd).toBeUndefined();
+    expect(claude.requests[2]!.prompt).toContain('Une session précédente a commencé cette story');
   });
 
   it('ne lance pas en parallèle deux stories qui touchent un même fichier', async () => {
@@ -542,7 +699,7 @@ describe('Orchestrator', () => {
       expect(events.some((e) => e.kind === 'returned' && e.reason.includes('npm test'))).toBe(true);
       expect(await settle('42')).toBe('awaiting_human');
       const devs = claude.requests.filter((r) => r.schema === DEV_SCHEMA);
-      expect(devs[1]!.resume).toBe('session-1');
+      expect(devs[1]!.resume).toBeUndefined();
       expect(devs[1]!.prompt).toContain('« npm test » échoue');
       expect(devs[1]!.prompt).toContain('2 tests en échec');
 
@@ -569,7 +726,7 @@ describe('Orchestrator', () => {
       expect(await settle('42')).toBe('awaiting_human');
       expect(seen).toContain('<<<<<<<');
       const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
-      expect(dev.resume).toBe('session-1');
+      expect(dev.resume).toBeUndefined();
       expect(dev.prompt).toContain('- src/email.ts');
       const run = (await store.read()).stories['42']!;
       expect(await git(run.worktree, 'rev-list', '--merges', `${FEATURE}..HEAD`)).not.toBe('');
@@ -597,7 +754,7 @@ describe('Orchestrator', () => {
       expect(devs[2]!.prompt).toContain('marqueurs de conflit restants dans src/email.ts');
     });
 
-    it("renvoie tes retours à l'agent dans sa session, sans dupliquer les fiches du tri", async () => {
+    it("renvoie tes retours à un agent neuf, sans dupliquer les fiches du tri", async () => {
       await addReady('42', ['src/email.ts']);
       const issue = {
         title: 'Extraire la constante',
@@ -618,14 +775,14 @@ describe('Orchestrator', () => {
       expect(await settle('42')).toBe('awaiting_human');
 
       const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
-      expect(dev.resume).toBe('session-1');
+      expect(dev.resume).toBeUndefined();
       expect(dev.prompt).toContain('Retours de la revue humaine');
       expect(dev.prompt).toContain('Renomme ok en valid.');
       expect((await store.read()).stories['42']!.followUps).toEqual(['LOCAL-1']);
       expect(await fs.readdir(path.join(work, 'new'))).toEqual(['LOCAL-1-extraire-la-constante.md']);
     });
 
-    it("transmet ta réponse à un agent bloqué, dans sa session", async () => {
+    it("transmet ta réponse à un agent bloqué, en session neuve", async () => {
       await addReady('42', ['src/email.ts']);
       claude.dev.push(async () => ({
         status: 'blocked',
@@ -646,7 +803,7 @@ describe('Orchestrator', () => {
       expect(await settle('42')).toBe('awaiting_human');
 
       const dev = claude.requests.filter((r) => r.schema === DEV_SCHEMA)[1]!;
-      expect(dev.resume).toBe('session-1');
+      expect(dev.resume).toBeUndefined();
       expect(dev.prompt).toContain('Réponse humaine à ton blocage');
       expect(dev.prompt).toContain('Quel format de date ?');
       expect(dev.prompt).toContain('ISO 8601.');

@@ -28,7 +28,12 @@ describe('buildClaudeArgs', () => {
     expect(args.join(' ')).toContain('--resume abc');
   });
 
-  it("ne laisse aucun outil quand la liste est vide", () => {
+  it('plafonne les tours quand on le demande', () => {
+    expect(buildClaudeArgs({ ...base, maxTurns: 40 }).join(' ')).toContain('--max-turns 40');
+    expect(buildClaudeArgs(base)).not.toContain('--max-turns');
+  });
+
+    it("ne laisse aucun outil quand la liste est vide", () => {
     const args = buildClaudeArgs({ ...base, tools: [] });
     expect(args[args.indexOf('--tools') + 1]).toBe('');
     expect(args).not.toContain('--allowedTools');
@@ -138,9 +143,19 @@ describe('parseClaudeResult', () => {
     expect(parseClaudeResult(out).permissionDenials).toEqual(['Bash : git push']);
   });
 
-  it('remonte une erreur du CLI', () => {
-    const out = JSON.stringify({ subtype: 'error_max_turns', is_error: true, session_id: 's1', result: '' });
+  it('remonte une erreur du CLI, avec ce que la session a coûté', () => {
+    const out = JSON.stringify({ subtype: 'error_during_execution', is_error: true, session_id: 's1', result: '', total_cost_usd: 0.4 });
     expect(() => parseClaudeResult(out)).toThrow(ClaudeError);
+    try {
+      parseClaudeResult(out);
+    } catch (err) {
+      expect((err as ClaudeError).costUsd).toBe(0.4);
+    }
+  });
+
+  it('dit clairement que le plafond de tours est atteint', () => {
+    const out = JSON.stringify({ subtype: 'error_max_turns', is_error: true, session_id: 's1', num_turns: 41 });
+    expect(() => parseClaudeResult(out)).toThrow('plafond de tours (41 tours)');
   });
 
   it('refuse une réponse sans sortie structurée', () => {

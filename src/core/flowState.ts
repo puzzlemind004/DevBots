@@ -13,6 +13,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { readJson, replaceFile } from '../util/files.js';
+import type { CrReview, StepResult } from './supervision.js';
 
 /**
  * Les états d'une story après Ready. `new`, `planning` et `ready` se lisent
@@ -43,6 +44,14 @@ export const ACTIVE_STATUSES: readonly FlowStatus[] = [
 
 export type CheckStatus = 'passed' | 'failed' | 'not_run';
 
+/** Une commande de `devbots.dev.checkCommands`, lancée par l'extension après la session. */
+export interface CheckRun {
+  command: string;
+  passed: boolean;
+  /** La fin de la sortie, en cas d'échec. */
+  output?: string;
+}
+
 /** Ce que l'agent de dev déclare à la fin d'une session, d'après sa sortie structurée. */
 export interface DevReport {
   status: 'done' | 'blocked';
@@ -56,6 +65,8 @@ export interface DevReport {
   commit?: string;
   /** Refus du commit par un hook du dépôt : une correction pour l'agent. */
   commitError?: string;
+  /** Les checks lancés par l'extension après la session : ils font foi sur le statut déclaré. */
+  checks?: CheckRun[];
   permissionDenials: string[];
   at: string;
 }
@@ -81,6 +92,14 @@ export interface StoryRun {
   reason?: string;
   /** Corrections restées en suspens au plafond de boucles, reprises à la relance. */
   pendingCorrections?: string;
+  /**
+   * Ce que la dernière revue a demandé, pendant une boucle de correction : la
+   * revue suivante vérifie ces points sur le diff de la correction, sans tout
+   * relire. Effacé à « À valider » et à chaque nouveau travail demandé.
+   */
+  verification?: Verification;
+  /** Coût estimé des sessions depuis le dernier lancement, comparé au budget de la story. */
+  costUsd?: number;
   /** Fiches créées par le tri des problèmes. */
   followUps: string[];
   /** Port de l'application lancée pour ta revue, propre au worktree. */
@@ -89,6 +108,15 @@ export interface StoryRun {
   mergedAt?: string;
   mergeCommit?: string;
   mergeBase?: string;
+}
+
+export interface Verification {
+  /** Le commit relu : le diff de la correction part de lui. */
+  commit: string;
+  /** La dernière revue du CR faite par Claude, absente si elle n'a pas encore tourné. */
+  crReview?: CrReview;
+  /** Les derniers résultats des étapes de supervision. */
+  results: StepResult[];
 }
 
 export interface FlowState {
