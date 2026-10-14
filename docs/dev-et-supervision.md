@@ -201,6 +201,67 @@ dossiers restent la source de vérité pour New, Ready et Done.
 La barre d'état indique les agents actifs, les stories en file et celles qui
 attendent ta revue.
 
+## Déjà fait
+
+Une story de New ou de Ready dont le dev a été fait ailleurs (à la main, dans
+une autre story, sur une autre branche) n'a pas à repasser par le flux. Clic
+droit, « Déjà fait », puis au choix :
+
+| Choix | Effet |
+| --- | --- |
+| Passer directement en Done | Sur ta parole : la fiche passe dans `done/`, marquée `done_outside: direct` |
+| Faire vérifier par un agent avant | Un agent en lecture seule cherche le travail dans le dépôt. Done s'il le confirme, marquée `done_outside: verified` ; sinon la story reste où elle est |
+
+Un champ facultatif demande où trouver le travail (branche, commit, PR,
+dossier). Il aide l'agent à chercher et reste dans la fiche, en `done_note`.
+
+L'agent tourne à la racine du dépôt, sur la branche extraite, avec le modèle
+de `devbots.supervision.model`. Il n'a que `Read`, `Grep`, `Glob` et
+`git log`, `git show`, `git diff`, `git branch`, `git grep`, `git status` :
+de quoi regarder l'historique et les autres branches, rien pour écrire. Il ne
+lance ni build ni tests : il juge sur le code. Pour chaque critère
+d'acceptation, il dit s'il est couvert, en partie ou pas, avec ses preuves
+(fichiers, lignes, commits).
+
+- Verdict « déjà fait » : chaque critère est couvert. Un verdict « déjà fait »
+  qui laisse un critère de côté est lu comme « fait en partie ».
+- « Fait en partie » ou « pas trouvé » : la notification propose le rapport,
+  ou « Passer en Done quand même ».
+
+Le rapport est dans `.work/runs/<id>/verification.md`, le fil de l'agent dans
+le journal de la story, ouvert en direct au lancement. La notification de
+progression permet d'annuler. Une story en dev, en file, bloquée ou à valider
+n'est pas concernée : « Retirer du flux de dev » la rend d'abord à Ready.
+
+Une story passée dans Done ainsi libère celles qui l'attendaient, comme après
+un merge. Elle n'a ni diff, ni CR, ni worktree.
+
+## Usage Claude
+
+La vue « Usage Claude », sous le flux dans le panneau DevBots, montre ce que
+`/usage` montre dans Claude Code :
+
+| Ligne | Contenu |
+| --- | --- |
+| Session | La fenêtre glissante de 5 h : part consommée, jauge, heure de réinitialisation |
+| Semaine | La fenêtre de 7 jours : même chose, avec le jour |
+| Relevé | L'âge du dernier relevé ; un clic en fait un neuf |
+
+Les chiffres valent pour tout le compte (Claude Code, claude.ai), pas
+seulement pour DevBots. La jauge passe en orange à 75 %, en rouge à 90 %.
+
+Chaque appel `claude -p` lancé par DevBots (agent de dev, revue, supervision,
+vérification « déjà fait ») publie l'usage au passage, dans un
+`rate_limit_event` de son flux : la vue suit sans rien coûter. Le bouton ↻ de
+la vue, ou un clic sur « Relevé », fait un appel minimal (haiku, aucun outil,
+aucune session gardée, hors du dépôt) quand aucun agent ne tourne. DevBots ne
+lit aucun identifiant : il ne fait que lire ce que le CLI écrit.
+
+Le dernier relevé est gardé d'une session de VS Code à l'autre ; une fenêtre
+dont l'heure de réinitialisation est passée s'affiche « réinitialisée »
+jusqu'au relevé suivant. Une connexion par clé d'API n'a ni session ni semaine :
+la vue reste vide.
+
 ## Ensuite
 
 Une story « À valider » se relit depuis sa carte : diff, worktree, retours,

@@ -11,6 +11,8 @@
  * séquentiel dans la branche de la feature, nettoyage, passage dans Done.
  * Phase 5 : resynchronisation avec la source et décision sur les stories
  * « à revoir », niveau de notifications et badge, paquet `.vsix`.
+ * Ensuite : « déjà fait » (Done direct ou après vérification par un agent),
+ * vue de l'usage Claude (session et semaine).
  */
 
 import { promises as fs } from 'node:fs';
@@ -26,6 +28,7 @@ import { PlanningPanel } from './ui/planningPanel.js';
 import { customizeTemplates } from './ui/templatesCommand.js';
 import { DevController } from './ui/devController.js';
 import { SourceSync } from './ui/resyncCommand.js';
+import { UsageViewProvider } from './ui/usageView.js';
 import {
   CONFIG_SECTION,
   deleteSecret,
@@ -60,9 +63,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const watcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(folder, `${config.workDir}/**/*.{md,json}`)
   );
-  const dev = new DevController({ repoUri: folder.uri, log, refresh: () => tree.refresh() });
+  // L'usage de l'abonnement, relevé au passage de chaque agent.
+  const usage = new UsageViewProvider(context.globalState, folder.uri, log);
+  context.subscriptions.push(usage, ...usage.register());
+
+  const dev = new DevController({
+    repoUri: folder.uri,
+    log,
+    refresh: () => tree.refresh(),
+    onUsage: (snapshot) => usage.record(snapshot)
+  });
   context.subscriptions.push(dev, ...dev.register());
   dev.setBadgeView(view);
+  tree.setVerifying((storyId) => dev.isVerifying(storyId));
 
   // Le badge suit les fiches : une story marquée « à revoir » le fait bouger.
   let indicatorsTimer: ReturnType<typeof setTimeout> | undefined;

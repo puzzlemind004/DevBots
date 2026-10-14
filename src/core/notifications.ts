@@ -21,15 +21,20 @@ export type NotificationKind =
   | 'returned'
   | 'merged'
   | 'mergedWithWarning'
-  | 'sourceChanged';
+  | 'sourceChanged'
+  /** Une story « déjà faite », confirmée par l'agent de vérification et passée dans Done. */
+  | 'verifiedDone'
+  /** L'agent de vérification ne retrouve pas tout le travail : la story reste, à toi de trancher. */
+  | 'verificationRefuted';
 
-/** Ceux qui demandent un geste : revue, relance, décision sur un changement, nettoyage à finir. */
+/** Ceux qui demandent un geste : revue, relance, décision sur un changement ou une vérification, nettoyage à finir. */
 const ACTIONS: ReadonlySet<NotificationKind> = new Set([
   'awaitingHuman',
   'blocked',
   'mergeFailed',
   'mergedWithWarning',
-  'sourceChanged'
+  'sourceChanged',
+  'verificationRefuted'
 ]);
 
 export function shouldNotify(level: NotificationLevel, kind: NotificationKind): boolean {

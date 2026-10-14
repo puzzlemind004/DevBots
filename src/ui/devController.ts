@@ -9,7 +9,8 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { createClaudeStreamRunner } from '../core/claudeCli.js';
+import { verdictLabel, verifyAlreadyDone } from '../core/alreadyDone.js';
+import { ClaudeError, createClaudeStreamRunner, type ClaudeStreamRunner } from '../core/claudeCli.js';
 import { FlowStateStore, RUNNING_STATUSES, statusLabel, type StoryRun } from '../core/flowState.js';
 import { Orchestrator, type DevSettings, type OrchestratorEvent } from '../core/orchestrator.js';
 import { safeId } from '../core/planStore.js';
@@ -17,6 +18,7 @@ import { dependencyView, schedulable } from '../core/schedule.js';
 import { shouldNotify, waitingCount } from '../core/notifications.js';
 import { DEFAULT_SUPERVISION_FILE, SUPERVISION_FILE } from '../core/supervision.js';
 import { WorkDir, type StoryFile } from '../core/workDir.js';
+import type { UsageSnapshot } from '../core/usage.js';
 import { readConfig } from '../util/config.js';
 import type { FlowNode, StoryNode } from './flowTree.js';
 import { GIT_SCHEME, GitContentProvider, openStoryDiff } from './storyDiff.js';
@@ -26,6 +28,8 @@ export interface DevContext {
   log: vscode.LogOutputChannel;
   /** Rafraîchit le panneau. */
   refresh: () => void;
+  /** Reçoit l'usage de l'abonnement que publient les agents au passage. */
+  onUsage?: (snapshot: UsageSnapshot) => void;
 }
 
 const MODELS = ['opus', 'sonnet', 'haiku'] as const;
@@ -38,6 +42,8 @@ export class DevController implements vscode.Disposable {
   private readonly serveTerminals = new Map<string, vscode.Terminal>();
   /** Les discussions que DevBots ferme lui-même avant une relance : leur fermeture ne propose rien. */
   private readonly closingAgentTerminals = new Set<vscode.Terminal>();
+  /** Les stories « déjà faites » dont un agent vérifie le travail en ce moment. */
+  private readonly verifying = new Set<string>();
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
   private badgeView: vscode.TreeView<FlowNode> | undefined;
@@ -106,6 +112,8 @@ export class DevController implements vscode.Disposable {
       vscode.commands.registerCommand('devbots.openWorktree', (node?: FlowNode) => this.openWorktree(node)),
       vscode.commands.registerCommand('devbots.openAgentSession', (node?: FlowNode) => this.openAgentSession(node)),
       vscode.commands.registerCommand('devbots.serveApp', (node?: FlowNode) => this.serveApp(node)),
+      vscode.commands.registerCommand('devbots.alreadyDone', (node?: FlowNode) => this.alreadyDone(node)),
+      vscode.commands.registerCommand('devbots.openVerification', (node?: FlowNode) => this.openVerification(node)),
       vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitContentProvider())
     ];
   }
@@ -305,6 +313,180 @@ export class DevController implements vscode.Disposable {
       }
     }
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(filePath)));
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Déjà fait                                                         */
+  /* ---------------------------------------------------------------- */
+
+  /** Vrai quand un agent vérifie en ce moment que la story est déjà faite. */
+  isVerifying(storyId: string): boolean {
+    return this.verifying.has(storyId);
+  }
+
+  /**
+   * Une story de New ou de Ready dont le dev a été fait hors du flux : elle
+   * passe directement dans Done, ou après confirmation par un agent en
+   * lecture seule.
+   */
+  private async alreadyDone(node?: FlowNode): Promise<void> {
+    const story = node?.kind === 'story' ? node.story : await this.pickNotStarted('Quelle story est déjà faite ?');
+    if (!story) {
+      return;
+    }
+    const id = story.frontmatter.source_id;
+    if (story.folder === 'done') {
+      vscode.window.showInformationMessage(`${id} est déjà dans Done.`);
+      return;
+    }
+    const run = (await new FlowStateStore(this.workDir.statePath()).read()).stories[id];
+    if (run) {
+      vscode.window.showInformationMessage(
+        `${id} est dans le flux de dev (${statusLabel(run.status)}) : retire-la du flux d'abord.`
+      );
+      return;
+    }
+    if (this.verifying.has(id)) {
+      vscode.window.showInformationMessage(`Un agent vérifie déjà ${id}.`);
+      return;
+    }
+
+    const where = story.folder === 'new' ? 'dans New' : 'dans Ready';
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: '$(pass) Passer directement en Done',
+          detail: "Sans vérification, sur ta parole. Les stories qui l'attendaient peuvent partir.",
+          value: 'direct' as const
+        },
+        {
+          label: '$(search) Faire vérifier par un agent avant',
+          detail: `Un agent en lecture seule cherche dans le dépôt (branche extraite, historique git) le code de chaque critère. Done s'il le confirme ; sinon la story reste ${where}, avec son rapport.`,
+          value: 'verify' as const
+        }
+      ],
+      { title: `${id} — ${story.title} : déjà fait`, ignoreFocusOut: true }
+    );
+    if (!choice) {
+      return;
+    }
+    const hint = await vscode.window.showInputBox({
+      title: `${id} : où trouver ce travail ? (facultatif)`,
+      prompt:
+        choice.value === 'verify'
+          ? "Aide l'agent à chercher. Vide : il cherche seul. Gardé dans la fiche."
+          : 'Gardé dans la fiche, pour mémoire.',
+      placeHolder: 'Par exemple : branche feature/login, commit abc1234, PR #12, src/app/auth/',
+      ignoreFocusOut: true
+    });
+    if (hint === undefined) {
+      return;
+    }
+    if (choice.value === 'direct') {
+      await this.guard(() => this.markDone(story, 'direct', hint));
+    } else {
+      await this.verify(story, hint);
+    }
+  }
+
+  private async markDone(story: StoryFile, how: 'direct' | 'verified', hint: string): Promise<void> {
+    await this.workDir.moveToDone(story, {
+      done_outside: how,
+      done_at: new Date().toISOString(),
+      done_note: hint.trim() || undefined
+    });
+    this.ctx.log.info(
+      `${story.frontmatter.source_id} passée dans Done ${how === 'direct' ? 'sur ta parole' : "après vérification par l'agent"}.`
+    );
+    this.ctx.refresh();
+    // Les stories qui l'attendaient peuvent partir.
+    await this.orchestrator.pump();
+  }
+
+  /** La vérification par un agent, suivie dans une notification qu'on peut annuler et dans le journal. */
+  private async verify(story: StoryFile, hint: string): Promise<void> {
+    const id = story.frontmatter.source_id;
+    this.verifying.add(id);
+    this.ctx.refresh();
+    (await this.journal(id, true)).show(true);
+    const config = readConfig(this.ctx.repoUri);
+    try {
+      const verification = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `${id} : un agent vérifie le travail déjà fait…`, cancellable: true },
+        (_progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => controller.abort());
+          return verifyAlreadyDone(
+            {
+              repoRoot: this.ctx.repoUri.fsPath,
+              workDir: this.workDir,
+              stream: this.streamRunner(),
+              model: config.supervisionModel,
+              onJournal: (storyId, line) => this.journals.get(storyId)?.appendLine(line)
+            },
+            story,
+            hint,
+            controller.signal
+          );
+        }
+      );
+      // La fiche a pu bouger pendant la vérification : on repart de ce qui est sur disque.
+      const current = await this.workDir.findStory(id);
+      if (!current || current.folder === 'done') {
+        return;
+      }
+      const level = readConfig(this.ctx.repoUri).notificationLevel;
+      if (verification.verdict === 'done') {
+        await this.markDone(current, 'verified', hint);
+        if (shouldNotify(level, 'verifiedDone')) {
+          void vscode.window
+            .showInformationMessage(`${id} : l'agent confirme le travail, la story passe dans Done.`, 'Voir le rapport')
+            .then((chosen) => chosen && this.openVerification(id));
+        }
+        return;
+      }
+      this.ctx.log.info(`${id} : ${verdictLabel(verification.verdict)} d'après l'agent. ${verification.summary}`);
+      if (shouldNotify(level, 'verificationRefuted')) {
+        const force = 'Passer en Done quand même';
+        const chosen = await vscode.window.showWarningMessage(
+          `${id} : ${verdictLabel(verification.verdict)} d'après l'agent, la story reste ${current.folder === 'new' ? 'dans New' : 'dans Ready'}. ${verification.summary}`,
+          'Voir le rapport',
+          force
+        );
+        if (chosen === 'Voir le rapport') {
+          await this.openVerification(id);
+        } else if (chosen === force) {
+          await this.guard(() => this.markDone(current, 'direct', hint));
+        }
+      }
+    } catch (err) {
+      if (err instanceof ClaudeError && err.cancelled) {
+        vscode.window.showInformationMessage(`Vérification de ${id} annulée.`);
+        return;
+      }
+      const message = `Vérification de ${id} impossible : ${err instanceof Error ? err.message : String(err)}`;
+      this.ctx.log.error(message);
+      vscode.window.showErrorMessage(message);
+    } finally {
+      this.verifying.delete(id);
+      this.ctx.refresh();
+    }
+  }
+
+  /** Le rapport de la vérification « déjà fait », d'après le nœud cliqué ou l'identifiant. */
+  private async openVerification(target?: FlowNode | string): Promise<void> {
+    const id = typeof target === 'string' ? target : target?.kind === 'story' ? target.story.frontmatter.source_id : undefined;
+    if (!id) {
+      return;
+    }
+    const filePath = path.join(this.workDir.runsPath(), safeId(id), 'verification.md');
+    try {
+      await fs.access(filePath);
+    } catch {
+      vscode.window.showInformationMessage(`Pas de rapport de vérification pour ${id}.`);
+      return;
+    }
+    await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(filePath));
   }
 
   /* ---------------------------------------------------------------- */
@@ -665,7 +847,7 @@ export class DevController implements vscode.Disposable {
       repoRoot: repoUri.fsPath,
       workDir: this.workDir,
       store: new FlowStateStore(this.workDir.statePath()),
-      stream: (request) => createClaudeStreamRunner(readConfig(repoUri).claudeExecutable)(request),
+      stream: (request) => this.streamRunner()(request),
       settings: (): DevSettings => {
         const c = readConfig(repoUri);
         return {
@@ -687,6 +869,11 @@ export class DevController implements vscode.Disposable {
       },
       onEvent: (event) => this.onEvent(event)
     });
+  }
+
+  /** Le lanceur des agents, relu à chaque appel : le chemin du CLI peut changer entre deux. */
+  private streamRunner(): ClaudeStreamRunner {
+    return createClaudeStreamRunner(readConfig(this.ctx.repoUri).claudeExecutable, this.ctx.onUsage);
   }
 
   private async guard(action: () => Promise<void>): Promise<void> {
@@ -739,6 +926,27 @@ export class DevController implements vscode.Disposable {
       stories.map((story) => ({
         label: `${story.frontmatter.source_id} — ${story.title}`,
         description: story.frontmatter.recommended_model,
+        story
+      })),
+      { title }
+    );
+    return picked?.story;
+  }
+
+  /** Une story de New ou de Ready qui n'est pas partie en dev. */
+  private async pickNotStarted(title: string): Promise<StoryFile | undefined> {
+    const state = await new FlowStateStore(this.workDir.statePath()).read();
+    const stories = [...(await this.workDir.listStories('new')), ...(await this.workDir.listStories('ready'))].filter(
+      (s) => !state.stories[s.frontmatter.source_id]
+    );
+    if (stories.length === 0) {
+      vscode.window.showInformationMessage('Aucune story dans New ou Ready.');
+      return undefined;
+    }
+    const picked = await vscode.window.showQuickPick(
+      stories.map((story) => ({
+        label: `${story.frontmatter.source_id} — ${story.title}`,
+        description: story.folder === 'new' ? 'New' : 'Ready',
         story
       })),
       { title }

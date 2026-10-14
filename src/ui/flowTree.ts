@@ -64,13 +64,22 @@ export interface StoryNode {
   run?: StoryRun;
   /** Dépendances infirmées par le plan : « parallélisable d'après le code ». */
   parallelizable?: string[];
+  /** Un agent vérifie en ce moment que son dev est déjà fait. */
+  verifying?: boolean;
 }
 
 export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
   private readonly changed = new vscode.EventEmitter<FlowNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
 
+  /** Les stories « déjà faites » en cours de vérification, tenues par le contrôleur du dev. */
+  private isVerifying: (storyId: string) => boolean = () => false;
+
   constructor(private workDir: WorkDir) {}
+
+  setVerifying(isVerifying: (storyId: string) => boolean): void {
+    this.isVerifying = isVerifying;
+  }
 
   setWorkDir(workDir: WorkDir): void {
     this.workDir = workDir;
@@ -133,6 +142,7 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
           group,
           planning: folder === 'new' ? phases.get(id) : undefined,
           run,
+          verifying: folder !== 'done' && this.isVerifying(id),
           parallelizable:
             folder === 'ready'
               ? dependencyView(schedulable(story.frontmatter), state.dependencyOverrides[id]).parallelizable
@@ -211,13 +221,21 @@ function featureItem(node: FeatureNode): vscode.TreeItem {
 
 /**
  * `contextValue` d'une story : `story:<groupe>`, puis son état après Ready,
- * puis les marques `:linked` (lien vers la source) et `:followup` (née du tri).
+ * puis les marques `:verifying` (vérification « déjà fait » en cours),
+ * `:outside-direct` ou `:outside-verified` (passée dans Done hors du flux),
+ * `:followup` (née du tri) et `:linked` (lien vers la source).
  * Les menus de `package.json` filtrent sur ces morceaux.
  */
 function storyContext(node: StoryNode): string {
   const parts = [`story:${node.group}`];
   if (node.run) {
     parts.push(node.run.status);
+  }
+  if (node.verifying) {
+    parts.push('verifying');
+  }
+  if (node.story.frontmatter.done_outside) {
+    parts.push(`outside-${node.story.frontmatter.done_outside}`);
   }
   if (node.story.frontmatter.origin) {
     parts.push('followup');
@@ -270,6 +288,29 @@ function storyItem(node: StoryNode): vscode.TreeItem {
       item.tooltip.appendMarkdown('\n\n$(warning) La story a changé dans la source depuis sa planification.');
       item.tooltip.supportThemeIcons = true;
     }
+  } else if (node.verifying) {
+    item.iconPath = new vscode.ThemeIcon('sync~spin');
+    item.description = 'vérification « déjà fait »';
+    item.tooltip = new vscode.MarkdownString(
+      `**${story.title}**\n\nUn agent en lecture seule cherche dans le dépôt le travail déjà fait. La story passe dans Done s'il le confirme.`
+    );
+  } else if (story.frontmatter.done_outside) {
+    const verified = story.frontmatter.done_outside === 'verified';
+    item.iconPath = new vscode.ThemeIcon(verified ? 'verified-filled' : 'pass-filled');
+    item.description = verified ? 'déjà fait · vérifiée' : 'déjà fait';
+    item.tooltip = new vscode.MarkdownString(
+      [
+        `**${story.title}**`,
+        '',
+        verified
+          ? `- Passée dans Done le ${story.frontmatter.done_at?.slice(0, 10) ?? '?'}, après vérification par un agent`
+          : `- Passée dans Done le ${story.frontmatter.done_at?.slice(0, 10) ?? '?'}, sur ta parole`,
+        story.frontmatter.done_note ? `- Où : ${story.frontmatter.done_note}` : undefined,
+        '- Dev fait hors du flux de DevBots'
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
   } else if (needsReview) {
     item.description = 'à revoir';
     item.iconPath = new vscode.ThemeIcon(

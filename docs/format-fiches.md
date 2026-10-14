@@ -137,6 +137,24 @@ Une fiche simple arrive directement dans `ready/`, avec une section
 `## Mini-plan`, `recommended_model: "haiku"` et le fichier concerné dans
 `files`. Une fiche complexe arrive dans `new/` et passe par l'atelier.
 
+### Fiche passée dans Done hors du flux
+
+Une story « déjà faite » (voir
+[Dev et supervision](dev-et-supervision.md#déjà-fait)) arrive dans `done/`
+sans merge. Son frontmatter le dit :
+
+```yaml
+done_outside: "verified"
+done_at: "2026-10-14T10:00:00.000Z"
+done_note: "branche feature/login"
+```
+
+| Champ | Rôle |
+| --- | --- |
+| `done_outside` | `direct` : sur ta parole. `verified` : après confirmation par l'agent de vérification |
+| `done_at` | Date du passage dans Done |
+| `done_note` | Ton indication sur l'endroit où trouver le travail, si tu en as donné une |
+
 ## Fiches de feature
 
 Une feature ne passe pas par le flux : elle ne se planifie pas et ne bouge pas

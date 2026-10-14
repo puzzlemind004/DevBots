@@ -97,6 +97,15 @@ export interface StoryFrontmatter {
   merged_at?: string;
   merge_commit?: string;
   merged_into?: string;
+  /**
+   * Écrits quand la story passe dans `done/` sans le flux de dev, son dev
+   * ayant été fait ailleurs : `direct` sur ta parole, `verified` après
+   * confirmation par un agent (rapport dans `runs/<id>/verification.md`).
+   */
+  done_outside?: 'direct' | 'verified';
+  done_at?: string;
+  /** Ton indication : où trouver ce travail (branche, commit, PR…). */
+  done_note?: string;
 }
 
 export type SourceKind = 'github' | 'azureDevOps';

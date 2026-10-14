@@ -7,6 +7,7 @@
  */
 
 import { exec, ExecError } from '../util/exec.js';
+import { parseRateLimitLine, type UsageSnapshot } from './usage.js';
 
 /**
  * Version minimale vérifiée au démarrage.
@@ -223,17 +224,30 @@ export function createClaudeRunner(executable: string): ClaudeRunner {
  *
  * La dernière ligne est le résultat, de la même forme que la sortie `json` :
  * session, `structured_output`, refus de permission.
+ *
+ * `onUsage` reçoit au passage l'usage de l'abonnement (session, semaine), que
+ * le CLI publie à chaque réponse de l'API.
  */
-export function createClaudeStreamRunner(executable: string): ClaudeStreamRunner {
+export function createClaudeStreamRunner(
+  executable: string,
+  onUsage?: (snapshot: UsageSnapshot) => void
+): ClaudeStreamRunner {
   return (request) => {
     let pending = '';
     const onStdout = (chunk: string): void => {
       pending += chunk;
       const lines = pending.split('\n');
       pending = lines.pop() ?? '';
-      for (const line of lines) {
-        for (const event of parseStreamLine(line.trim())) {
+      for (const raw of lines) {
+        const line = raw.trim();
+        for (const event of parseStreamLine(line)) {
           request.onEvent(event);
+        }
+        if (onUsage && line.includes('"rate_limit_event"')) {
+          const usage = parseRateLimitLine(line);
+          if (usage) {
+            onUsage(usage);
+          }
         }
       }
     };

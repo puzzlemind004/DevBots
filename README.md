@@ -57,6 +57,12 @@ Ce qui marche aujourd'hui :
   [Resynchronisation](docs/resynchronisation.md)) ;
 - badge des stories qui t'attendent sur l'icône DevBots, niveau de
   notifications réglable ;
+- « déjà fait » : une story de New ou de Ready dont le dev a été fait ailleurs
+  passe dans Done, directement ou après vérification par un agent en lecture
+  seule (voir [Dev et supervision](docs/dev-et-supervision.md#déjà-fait)) ;
+- vue « Usage Claude » dans le panneau : session (5 h) et semaine de
+  l'abonnement, avec leurs heures de réinitialisation, relevées au passage des
+  agents (voir [Dev et supervision](docs/dev-et-supervision.md#usage-claude)) ;
 - paquet `.vsix` pour la diffusion (`npm run package`).
 
 ## Démarrer
@@ -143,6 +149,9 @@ ni dans `.work`.
 | DevBots : rapport de supervision | Revue du CR, problèmes de chaque étape, fiches créées par le tri |
 | DevBots : trancher une dépendance | Attendre une dépendance infirmée par le plan, ou lever une dépendance confirmée |
 | DevBots : reclasser la fiche | Fiche née du tri : de New à Ready, ou l'inverse |
+| DevBots : déjà fait | Story de New ou de Ready faite ailleurs : dans Done directement, ou après vérification par un agent en lecture seule |
+| DevBots : rapport de vérification « déjà fait » | Clic droit sur une story passée dans Done après vérification : le rapport de l'agent |
+| DevBots : relever l'usage Claude | Relevé frais de la session et de la semaine, par un appel minimal à haiku (aussi : ↻ de la vue « Usage Claude ») |
 | DevBots : personnaliser la supervision | Dépose `.work/supervision.json` prérempli et l'ouvre |
 | DevBots : voir le diff | Story à valider, bloquée ou mergée : ses changements dans la vue diff native |
 | DevBots : ouvrir le worktree | Dans une nouvelle fenêtre, ou ajouté à l'espace de travail |

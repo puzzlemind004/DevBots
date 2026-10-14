@@ -251,6 +251,12 @@
           "id": "devbots.flow",
           "name": "Flux",
           "icon": "resources/devbots.svg"
+        },
+        {
+          "id": "devbots.usage",
+          "name": "Usage Claude",
+          "icon": "resources/devbots.svg",
+          "size": 1
         }
       ]
     },
@@ -384,6 +390,21 @@
         "icon": "$(arrow-swap)"
       },
       {
+        "command": "devbots.alreadyDone",
+        "title": "DevBots : déjà fait (Done, ou vérification par un agent)",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "devbots.openVerification",
+        "title": "DevBots : rapport de vérification « déjà fait »",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "devbots.refreshUsage",
+        "title": "DevBots : relever l'usage Claude",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "devbots.setToken",
         "title": "DevBots : enregistrer un jeton d'accès"
       },
@@ -425,6 +446,11 @@
           "command": "devbots.resync",
           "when": "view == devbots.flow",
           "group": "1_create@2"
+        },
+        {
+          "command": "devbots.refreshUsage",
+          "when": "view == devbots.usage",
+          "group": "navigation@1"
         },
         {
           "command": "devbots.newFeature",
@@ -572,6 +598,16 @@
           "command": "devbots.reclassify",
           "when": "view == devbots.flow && viewItem =~ /^story:(new|ready).*:followup/",
           "group": "8_flow@3"
+        },
+        {
+          "command": "devbots.alreadyDone",
+          "when": "view == devbots.flow && viewItem =~ /^story:(new|ready)(?!.*:verifying)/",
+          "group": "8_flow@4"
+        },
+        {
+          "command": "devbots.openVerification",
+          "when": "view == devbots.flow && viewItem =~ /^story:done.*:outside-verified/",
+          "group": "7_review@1"
         }
       ],
       "commandPalette": [
@@ -589,6 +625,10 @@
         },
         {
           "command": "devbots.reclassify",
+          "when": "false"
+        },
+        {
+          "command": "devbots.openVerification",
           "when": "false"
         }
       ]

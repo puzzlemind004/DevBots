@@ -30,6 +30,8 @@ src/
 │   ├── supervision.ts  supervision.json, schémas, tri, fiches du tri, rapport
 │   ├── orchestrator.ts De Ready à Done : file, dev, revue, supervision, merge
 │   ├── resync.ts       Resynchronisation : relecture, bilan, replanification
+│   ├── alreadyDone.ts  « Déjà fait » : vérification par un agent en lecture seule, rapport
+│   ├── usage.ts        Usage de l'abonnement (session, semaine) lu dans le flux du CLI
 │   └── notifications.ts Niveau de notifications, compte du badge
 ├── sources/            Les connecteurs de tickets, en lecture seule
 │   ├── github.ts       Issue parente → sub-issues
@@ -43,6 +45,7 @@ src/
 │   ├── planningPanel.ts L'onglet de l'atelier (webview)
 │   ├── devController.ts Dev, supervision et revue : commandes, journaux, barre d'état, badge
 │   ├── resyncCommand.ts Resynchronisation, minuteur, « voir les changements »
+│   ├── usageView.ts    La vue « Usage Claude » du panneau
 │   └── storyDiff.ts    Le diff d'une story dans la vue native, contenu lu par git show
 └── util/
     ├── config.ts       Paramètres et SecretStorage
@@ -155,6 +158,13 @@ journal (`parseStreamLine`), le dernier portant `structured_output` comme en
 mode `json`. Leurs outils sont bornés par `--allowedTools` règle par règle, en
 `--permission-mode default` : en `-p`, ce qui n'est pas autorisé est refusé,
 et les refus remontent dans `permission_denials`.
+
+Ce même flux porte des `rate_limit_event` : l'usage de l'abonnement, fenêtre
+de 5 h et semaine, tel que l'API le renvoie dans ses en-têtes. Le lanceur les
+passe à `onUsage` (`core/usage.ts`), qui alimente la vue « Usage Claude ».
+Aucun identifiant n'est lu : l'extension ne fait que lire la sortie du CLI.
+Le détail par fenêtre (`unifiedWindows`) est marqué interne dans le CLI :
+s'il disparaît, la vue se rabat sur la fenêtre principale de l'événement.
 
 ## Fichiers d'état
 

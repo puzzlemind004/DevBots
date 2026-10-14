@@ -174,17 +174,23 @@ export class WorkDir {
   }
 
   /**
-   * Passe une fiche dans `done/`, avec ce que le merge ajoute à son
-   * frontmatter. Le corps (la story et son plan) reste intact.
+   * Passe une fiche dans `done/`, avec ce que le merge, ou le passage direct
+   * d'une story déjà faite, ajoute à son frontmatter. Le corps (la story et
+   * son plan) reste intact.
    */
   async moveToDone(
     story: StoryFile,
-    merge: Pick<StoryFrontmatter, 'merged_at' | 'merge_commit' | 'merged_into'>
+    merge: Pick<
+      Partial<StoryFrontmatter>,
+      'merged_at' | 'merge_commit' | 'merged_into' | 'done_outside' | 'done_at' | 'done_note'
+    >
   ): Promise<string> {
     await this.ensureFolders();
     const parsed = matter(await fs.readFile(story.filePath, 'utf8'));
     const target = path.join(this.folderPath('done'), path.basename(story.filePath));
-    const data = { ...(parsed.data as Record<string, unknown>), ...merge };
+    // Un champ absent n'est pas écrit : YAML ne sait pas représenter `undefined`.
+    const added = Object.fromEntries(Object.entries(merge).filter(([, v]) => v !== undefined));
+    const data = { ...(parsed.data as Record<string, unknown>), ...added };
     // `wx` : une fiche de done/ n'est jamais écrasée.
     await fs.writeFile(target, matter.stringify(parsed.content, data), { encoding: 'utf8', flag: 'wx' });
     await fs.rm(story.filePath);
