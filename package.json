@@ -376,6 +376,11 @@
         "icon": "$(book)"
       },
       {
+        "command": "devbots.openRunDocs",
+        "title": "DevBots : comptes rendus (CR de l'agent, supervision)",
+        "icon": "$(book)"
+      },
+      {
         "command": "devbots.approve",
         "title": "DevBots : feu vert (merge)",
         "icon": "$(check)"
@@ -544,8 +549,8 @@
           "group": "inline@3"
         },
         {
-          "command": "devbots.openReport",
-          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "command": "devbots.openRunDocs",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked.*:(cr|report)(:|$)/",
           "group": "inline@2"
         },
         {
@@ -580,7 +585,7 @@
         },
         {
           "command": "devbots.openWorktree",
-          "when": "view == devbots.flow && viewItem =~ /^story:dev:blocked/",
+          "when": "view == devbots.flow && viewItem =~ /^story:dev:(in_dev|ai_review|pre_pr_check|blocked)/",
           "group": "inline@4"
         },
         {

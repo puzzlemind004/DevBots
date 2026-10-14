@@ -14,6 +14,7 @@ import { ClaudeError, createClaudeStreamRunner, type ClaudeStreamRunner } from '
 import { FlowStateStore, RUNNING_STATUSES, statusLabel, type StoryRun } from '../core/flowState.js';
 import { Orchestrator, type DevSettings, type OrchestratorEvent } from '../core/orchestrator.js';
 import { safeId } from '../core/planStore.js';
+import { RUN_DOC_LABELS, runDocs, type RunDocKind } from '../core/runDocs.js';
 import { dependencyView, schedulable } from '../core/schedule.js';
 import { shouldNotify, waitingCount } from '../core/notifications.js';
 import { DEFAULT_SUPERVISION_FILE, SUPERVISION_FILE } from '../core/supervision.js';
@@ -101,8 +102,9 @@ export class DevController implements vscode.Disposable {
       vscode.commands.registerCommand('devbots.retryDev', (node?: FlowNode) => this.retryDev(node)),
       vscode.commands.registerCommand('devbots.dequeue', (node?: FlowNode) => this.dequeue(node)),
       vscode.commands.registerCommand('devbots.showJournal', (node?: FlowNode) => this.showJournal(node)),
-      vscode.commands.registerCommand('devbots.openReport', (node?: FlowNode) => this.openRunFile(node, 'report.md')),
-      vscode.commands.registerCommand('devbots.openCr', (node?: FlowNode) => this.openRunFile(node, 'cr.md')),
+      vscode.commands.registerCommand('devbots.openReport', (node?: FlowNode) => this.openRunFile(node, 'report')),
+      vscode.commands.registerCommand('devbots.openCr', (node?: FlowNode) => this.openRunFile(node, 'cr')),
+      vscode.commands.registerCommand('devbots.openRunDocs', (node?: FlowNode) => this.openRunDocs(node)),
       vscode.commands.registerCommand('devbots.decideDependency', (node?: FlowNode) => this.decideDependency(node)),
       vscode.commands.registerCommand('devbots.reclassify', (node?: FlowNode) => this.reclassify(node)),
       vscode.commands.registerCommand('devbots.customizeSupervision', () => this.customizeSupervision()),
@@ -211,21 +213,44 @@ export class DevController implements vscode.Disposable {
     }
   }
 
-  private async openRunFile(node: FlowNode | undefined, name: 'report.md' | 'cr.md'): Promise<void> {
-    const run = await this.runFor(node, name === 'cr.md' ? 'CR de quelle story ?' : 'Rapport de quelle story ?', () => true);
+  private async openRunFile(node: FlowNode | undefined, kind: RunDocKind): Promise<void> {
+    const run = await this.runFor(node, kind === 'cr' ? 'CR de quelle story ?' : 'Rapport de quelle story ?', () => true);
     if (!run) {
       return;
     }
-    const filePath = path.join(this.workDir.runsPath(), safeId(run.storyId), name);
-    try {
-      await fs.access(filePath);
-    } catch {
+    const doc = (await runDocs(this.workDir.runsPath(), run)).find((d) => d.kind === kind);
+    if (!doc) {
       vscode.window.showInformationMessage(
-        name === 'cr.md' ? `Pas encore de CR pour ${run.storyId}.` : `Pas encore de rapport pour ${run.storyId}.`
+        kind === 'cr' ? `Pas encore de CR pour ${run.storyId}.` : `Pas encore de rapport pour ${run.storyId}.`
       );
       return;
     }
-    await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(filePath));
+    await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(doc.path));
+  }
+
+  /** Les comptes rendus présents : ouverts directement s'il n'y en a qu'un, au choix sinon. */
+  private async openRunDocs(node?: FlowNode): Promise<void> {
+    const run = await this.runFor(node, 'Comptes rendus de quelle story ?', () => true);
+    if (!run) {
+      return;
+    }
+    const docs = await runDocs(this.workDir.runsPath(), run);
+    if (docs.length === 0) {
+      vscode.window.showInformationMessage(`Pas encore de compte rendu pour ${run.storyId}.`);
+      return;
+    }
+    const doc =
+      docs.length === 1
+        ? docs[0]
+        : (
+            await vscode.window.showQuickPick(
+              docs.map((d) => ({ label: RUN_DOC_LABELS[d.kind], doc: d })),
+              { title: `Comptes rendus de ${run.storyId}` }
+            )
+          )?.doc;
+    if (doc) {
+      await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(doc.path));
+    }
   }
 
   /**
@@ -724,9 +749,9 @@ export class DevController implements vscode.Disposable {
         .then((chosen) => {
           const node = this.fakeNode(event.storyId);
           if (chosen === 'Voir le rapport') {
-            void this.openRunFile(node, 'report.md');
+            void this.openRunFile(node, 'report');
           } else if (chosen === 'Voir le CR') {
-            void this.openRunFile(node, 'cr.md');
+            void this.openRunFile(node, 'cr');
           }
         });
     } else if (event.kind === 'merged') {

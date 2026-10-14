@@ -11,6 +11,7 @@ import type { FeatureFile, StoryFile, WorkDir } from '../core/workDir.js';
 import { PlanStore, type PlanningPhase } from '../core/planStore.js';
 import { FlowStateStore, statusLabel, type FlowState, type FlowStatus, type StoryRun } from '../core/flowState.js';
 import { dependencyView, schedulable } from '../core/schedule.js';
+import { runDocs, type RunDocKind } from '../core/runDocs.js';
 
 /** Les groupes du panneau, dans l'ordre du flux. */
 export type FlowGroup = 'new' | 'ready' | 'dev' | 'review' | 'done';
@@ -66,6 +67,8 @@ export interface StoryNode {
   parallelizable?: string[];
   /** Un agent vérifie en ce moment que son dev est déjà fait. */
   verifying?: boolean;
+  /** Comptes rendus présents d'une story bloquée : CR de l'agent, rapport de supervision. */
+  docs?: RunDocKind[];
 }
 
 export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
@@ -142,6 +145,7 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
           group,
           planning: folder === 'new' ? phases.get(id) : undefined,
           run,
+          docs: run?.status === 'blocked' ? (await runDocs(this.workDir.runsPath(), run)).map((d) => d.kind) : undefined,
           verifying: folder !== 'done' && this.isVerifying(id),
           parallelizable:
             folder === 'ready'
@@ -221,7 +225,8 @@ function featureItem(node: FeatureNode): vscode.TreeItem {
 
 /**
  * `contextValue` d'une story : `story:<groupe>`, puis son état après Ready,
- * puis les marques `:verifying` (vérification « déjà fait » en cours),
+ * puis les marques `:cr` et `:report` (comptes rendus d'une story bloquée),
+ * `:verifying` (vérification « déjà fait » en cours),
  * `:outside-direct` ou `:outside-verified` (passée dans Done hors du flux),
  * `:followup` (née du tri) et `:linked` (lien vers la source).
  * Les menus de `package.json` filtrent sur ces morceaux.
@@ -231,6 +236,7 @@ function storyContext(node: StoryNode): string {
   if (node.run) {
     parts.push(node.run.status);
   }
+  parts.push(...(node.docs ?? []));
   if (node.verifying) {
     parts.push('verifying');
   }
