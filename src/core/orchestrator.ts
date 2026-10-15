@@ -192,6 +192,44 @@ export class Orchestrator {
   /** Met une story de `ready/` dans la file, avec le modèle choisi. */
   async enqueue(storyId: string, model: string): Promise<void> {
     const story = await this.readyStory(storyId);
+    await this.putInQueue(story, model, {});
+    await this.journal(storyId, `Mise en file, modèle ${model}.`);
+    this.changed();
+    await this.pump();
+  }
+
+  /**
+   * Fait superviser une story de `ready/` dont le dev a été fait hors de
+   * DevBots, sur sa branche de story : pas de session de dev, directement la
+   * revue et les étapes de supervision, puis « À valider » si elles sont
+   * satisfaites. Sinon la story se bloque avec leurs corrections, qu'une
+   * relance confie à un agent de dev (`model`).
+   */
+  async enqueueSupervision(storyId: string, model: string): Promise<void> {
+    const story = await this.readyStory(storyId);
+    const existing = (await this.deps.store.read()).stories[storyId];
+    const branch = existing?.branch || storyBranchName(storyId, story.title);
+    if (!(await this.git.branchExists(branch))) {
+      throw new Error(`La branche ${branch} n'existe pas : pas de dev à superviser pour ${storyId}.`);
+    }
+    // Un worktree déjà ouvert sur la branche est repris : git refuse d'en extraire une seconde copie.
+    const checkedOut = await this.git.checkedOutIn(branch);
+    if (checkedOut && path.resolve(checkedOut) === path.resolve(this.deps.repoRoot)) {
+      throw new Error(`La branche ${branch} est extraite dans le dépôt : change de branche, DevBots la supervise dans un worktree.`);
+    }
+    await this.putInQueue(story, model, {
+      branch,
+      worktree: existing?.worktree || checkedOut || '',
+      supervisionOnly: true
+    });
+    await this.journal(storyId, `Mise en file pour superviser le dev existant de ${branch}.`);
+    this.changed();
+    await this.pump();
+  }
+
+  /** Une story de Ready, ou bloquée, entre dans la file. */
+  private async putInQueue(story: StoryFile, model: string, change: Partial<StoryRun>): Promise<void> {
+    const storyId = story.frontmatter.source_id;
     const now = this.now().toISOString();
     await this.deps.store.update((state) => {
       const existing = state.stories[storyId];
@@ -211,12 +249,10 @@ export class Orchestrator {
         queuedAt: now,
         updatedAt: now,
         lastDev: existing?.lastDev,
-        followUps: existing?.followUps ?? []
+        followUps: existing?.followUps ?? [],
+        ...change
       };
     });
-    await this.journal(storyId, `Mise en file, modèle ${model}.`);
-    this.changed();
-    await this.pump();
   }
 
   /**
@@ -331,6 +367,7 @@ export class Orchestrator {
         costUsd: undefined,
         verification: undefined,
         reason: undefined,
+        supervisionOnly: undefined,
         pendingCorrections: pending.filter(Boolean).join('\n\n'),
         queuedAt: this.now().toISOString(),
         updatedAt: this.now().toISOString()
@@ -493,10 +530,15 @@ export class Orchestrator {
 
       // Une relance après le plafond de boucles reprend les corrections en suspens.
       let corrections = run.pendingCorrections;
+      const takeOver = run.supervisionOnly === true;
       for (;;) {
-        run = await this.develop(run, corrections, signal);
-        if (run.lastDev?.status === 'blocked') {
-          return await this.block(run, `L'agent s'est déclaré bloqué : ${run.lastDev.blockedReason || 'sans raison donnée'}.`);
+        if (takeOver) {
+          run = await this.takeOver(run, signal);
+        } else {
+          run = await this.develop(run, corrections, signal);
+          if (run.lastDev?.status === 'blocked') {
+            return await this.block(run, `L'agent s'est déclaré bloqué : ${run.lastDev.blockedReason || 'sans raison donnée'}.`);
+          }
         }
 
         const review = await this.review(run, signal);
@@ -523,6 +565,15 @@ export class Orchestrator {
           crReview: review.automatic ? previous?.crReview : review,
           results: supervised ? results : (previous?.results ?? [])
         };
+        // Pas d'agent de dev sans ton accord : les corrections attendent ta relance.
+        if (takeOver) {
+          await this.deps.store.patch(storyId, { pendingCorrections: corrections, verification, supervisionOnly: undefined });
+          await this.writeReport(run, review, results, []);
+          return await this.block(
+            run,
+            'La supervision demande des corrections, détaillées dans le rapport : relance pour les confier à un agent de dev, ou écris-lui.'
+          );
+        }
         if (run.loops >= maxLoops) {
           await this.deps.store.patch(storyId, { pendingCorrections: corrections, verification });
           await this.writeReport(run, review, results, []);
@@ -692,19 +743,7 @@ export class Orchestrator {
     const message = corrections
       ? `${run.storyId} : corrections (boucle ${run.loops})`
       : `${run.storyId} : ${run.title}`;
-    try {
-      report.commit = await this.git.commitAll(run.worktree, message);
-      await this.journal(run.storyId, report.commit ? `Commit ${report.commit.slice(0, 8)}.` : 'Rien à commiter.');
-    } catch (err) {
-      // Un hook du dépôt qui refuse le commit est une correction pour l'agent.
-      if (!(err instanceof GitError)) {
-        throw err;
-      }
-      report.build = report.build === 'passed' ? 'passed' : report.build;
-      report.summary = `${report.summary}\n\nCommit refusé : ${err.message}`;
-      report.commitError = err.message;
-      await this.journal(run.storyId, `Commit refusé : ${err.message}`);
-    }
+    await this.commitWork(run, message, report);
 
     if (report.status === 'done' && settings.checkCommands.length > 0) {
       report.checks = await this.runDevChecks(run, settings.checkCommands, signal);
@@ -716,6 +755,57 @@ export class Orchestrator {
       devSessionId: response.sessionId,
       pendingCorrections: undefined
     }))!;
+  }
+
+  /**
+   * À la place de la session de dev, pour un dev fait hors de DevBots : ce
+   * qui traîne dans le worktree est commité, les checks tournent, et la revue
+   * relit la branche comme le travail d'un agent. Une branche sans rien de
+   * plus que sa base n'a rien à superviser.
+   */
+  private async takeOver(run: StoryRun, signal: AbortSignal): Promise<StoryRun> {
+    const settings = this.deps.settings();
+    await this.setStatus(run.storyId, 'in_dev');
+    await this.journal(run.storyId, `Dev fait hors de DevBots : pas de session de dev, ${run.branch} passe en revue.`);
+    const report: DevReport = {
+      status: 'done',
+      summary: `Dev fait hors de DevBots, sur ${run.branch}.`,
+      build: 'not_run',
+      tests: 'not_run',
+      testsDetail: '',
+      lint: 'not_run',
+      blockedReason: '',
+      permissionDenials: [],
+      at: this.now().toISOString()
+    };
+    await this.commitWork(run, `${run.storyId} : travail en cours, repris pour la supervision`, report);
+
+    const head = await this.git.headCommit(run.worktree);
+    const base = await this.git.mergeBase(run.worktree, run.baseBranch, head);
+    if ((await this.git.changedFiles(run.worktree, base)).length === 0) {
+      throw new Error(`Rien sur ${run.branch} par rapport à ${run.baseBranch} : pas de dev à superviser.`);
+    }
+
+    if (settings.checkCommands.length > 0) {
+      report.checks = await this.runDevChecks(run, settings.checkCommands, signal);
+    }
+    await this.copyCr(run);
+    return (await this.deps.store.patch(run.storyId, { lastDev: report }))!;
+  }
+
+  /** Le commit du travail par l'extension. Un hook du dépôt qui le refuse est une correction pour l'agent. */
+  private async commitWork(run: StoryRun, message: string, report: DevReport): Promise<void> {
+    try {
+      report.commit = await this.git.commitAll(run.worktree, message);
+      await this.journal(run.storyId, report.commit ? `Commit ${report.commit.slice(0, 8)}.` : 'Rien à commiter.');
+    } catch (err) {
+      if (!(err instanceof GitError)) {
+        throw err;
+      }
+      report.summary = `${report.summary}\n\nCommit refusé : ${err.message}`;
+      report.commitError = err.message;
+      await this.journal(run.storyId, `Commit refusé : ${err.message}`);
+    }
   }
 
   /**
@@ -765,7 +855,9 @@ export class Orchestrator {
     if (dev.commitError) {
       mechanical.push({ description: `Le commit a été refusé par un hook du dépôt : ${dev.commitError}`, location: '' });
     }
-    if (!(await exists(path.join(run.worktree, DEVBOTS_DIR, 'cr.md')))) {
+    const hasCr = await exists(path.join(run.worktree, DEVBOTS_DIR, 'cr.md'));
+    // Un dev fait hors de DevBots peut n'avoir pas de CR : la revue juge alors sur le diff.
+    if (!hasCr && !run.supervisionOnly) {
       mechanical.push({ description: 'Le compte rendu .devbots/cr.md est absent : rédige-le selon le gabarit.', location: '' });
     }
     if (mechanical.length > 0) {
@@ -793,7 +885,7 @@ export class Orchestrator {
       previous ? 'Revue du CR : vérification des corrections, session neuve.' : 'Revue du CR, session neuve.'
     );
     const response = await this.call(run.storyId, signal, {
-      prompt: previous ? reviewVerificationPrompt(run, previous) : reviewPrompt(run),
+      prompt: previous ? reviewVerificationPrompt(run, previous) : reviewPrompt(run, hasCr),
       cwd: run.worktree,
       schema: REVIEW_SCHEMA,
       model: this.deps.settings().reviewModel || undefined,
@@ -823,6 +915,7 @@ export class Orchestrator {
     const base = await this.writeDiff(run);
     const changed = await this.git.changedFiles(run.worktree, base);
     const previous = run.verification?.results ?? [];
+    const hasCr = await exists(path.join(run.worktree, DEVBOTS_DIR, 'cr.md'));
     const results: StepResult[] = [];
     for (const step of applicableSteps(steps, changed)) {
       const before = previous.find((r) => r.step === step.name);
@@ -843,7 +936,7 @@ export class Orchestrator {
         before ? `Étape ${step.name} : vérification des corrections, session neuve.` : `Étape ${step.name}, session neuve.`
       );
       const response = await this.call(run.storyId, signal, {
-        prompt: before ? stepVerificationPrompt(run, step, pending) : stepPrompt(run, step, changed),
+        prompt: before ? stepVerificationPrompt(run, step, pending) : stepPrompt(run, step, changed, hasCr),
         cwd: run.worktree,
         schema: ISSUES_SCHEMA,
         model: step.model ?? (this.deps.settings().reviewModel || undefined),
@@ -915,6 +1008,7 @@ export class Orchestrator {
       status: 'awaiting_human',
       reason: undefined,
       verification: undefined,
+      supervisionOnly: undefined,
       followUps: [...run.followUps, ...followUps]
     });
     await this.journal(run.storyId, 'Prête pour ta revue.');
@@ -1308,18 +1402,27 @@ function correctionPrompt(run: StoryRun, corrections: string, settings: DevSetti
   ].join('\n');
 }
 
-function reviewPrompt(run: StoryRun): string {
+function reviewPrompt(run: StoryRun, hasCr: boolean): string {
   const dev = run.lastDev!;
+  const passed = (dev.checks ?? []).map((c) => c.command);
   return [
-    `Revue du compte rendu de dev de la story ${run.storyId} — ${run.title}.`,
+    run.supervisionOnly
+      ? `Revue du dev de la story ${run.storyId} — ${run.title}, fait hors de DevBots.`
+      : `Revue du compte rendu de dev de la story ${run.storyId} — ${run.title}.`,
     '',
     '- .devbots/story.md : la fiche et son plan validé ;',
-    "- .devbots/cr.md : le CR rédigé par l'agent de dev ;",
+    ...(hasCr ? ["- .devbots/cr.md : le compte rendu de dev ;"] : []),
     `- .devbots/diff-stat.txt et .devbots/diff.patch : le diff de la branche ${run.branch} contre ${run.baseBranch}.`,
     '',
-    `Statut déclaré par l'agent : build ${dev.build}, tests ${dev.tests}, lint ${dev.lint}.`,
+    run.supervisionOnly
+      ? passed.length > 0
+        ? `Lancés par DevBots, au vert : ${passed.join(', ')}.`
+        : 'Ni build ni tests lancés : juge sur le code.'
+      : `Statut déclaré par l'agent : build ${dev.build}, tests ${dev.tests}, lint ${dev.lint}.`,
     '',
-    "Vérifie que le CR est fidèle au diff, que chaque critère du plan est couvert, et que les écarts au plan sont justifiés.",
+    hasCr
+      ? "Vérifie que le CR est fidèle au diff, que chaque critère du plan est couvert, et que les écarts au plan sont justifiés."
+      : 'Pas de CR : vérifie sur le diff que chaque critère du plan est couvert, et que les écarts au plan sont justifiés.',
     "Ne demande que des corrections bloquantes pour cette story : la qualité générale relève des étapes de supervision qui suivent.",
     "Sois exhaustif dès ce passage : après une correction, seuls les points que tu auras demandés seront revus."
   ].join('\n');
@@ -1345,7 +1448,7 @@ function reviewVerificationPrompt(run: StoryRun, previous: CrReview): string {
   ].join('\n');
 }
 
-function stepPrompt(run: StoryRun, step: SupervisionStep, changed: string[]): string {
+function stepPrompt(run: StoryRun, step: SupervisionStep, changed: string[], hasCr: boolean): string {
   const lines: string[] = [];
   if (step.skill) {
     lines.push(`/${step.skill}`, '');
@@ -1355,7 +1458,7 @@ function stepPrompt(run: StoryRun, step: SupervisionStep, changed: string[]): st
     '',
     `Le dossier courant est le worktree de la branche ${run.branch}, comparée à ${run.baseBranch}.`,
     '- .devbots/story.md : la fiche et son plan validé ;',
-    '- .devbots/cr.md : le compte rendu de dev ;',
+    ...(hasCr ? ['- .devbots/cr.md : le compte rendu de dev ;'] : []),
     '- .devbots/diff.patch : le diff complet.',
     '',
     `Fichiers modifiés : ${changed.length > 0 ? changed.join(', ') : 'aucun'}.`,

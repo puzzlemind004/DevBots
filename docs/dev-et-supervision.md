@@ -307,6 +307,29 @@ n'est pas concernée : « Retirer du flux de dev » la rend d'abord à Ready.
 Une story passée dans Done ainsi libère celles qui l'attendaient, comme après
 un merge. Elle n'a ni diff, ni CR, ni worktree.
 
+## Superviser un dev existant
+
+Une story de Ready, ou bloquée, dont le dev est déjà sur sa branche de story
+(`story/<id>-<slug>`, fait à la main ou par une autre version de DevBots) peut
+passer par la supervision sans agent de dev. Clic droit, « Faire superviser
+le dev existant », ou le troisième choix de « Déjà fait » pour une story de
+Ready.
+
+1. La story prend sa place dans la file, comme un lancement.
+2. Le worktree de la branche est repris s'il existe, n'importe où ; sinon il
+   est créé sur la branche. Une branche extraite dans le dépôt lui-même est
+   refusée : change de branche d'abord.
+3. Ce qui n'est pas commité dans le worktree est commité par l'extension,
+   puis les checks de `devbots.dev.checkCommands` tournent. Une branche qui
+   n'apporte rien à sa base se bloque là.
+4. Revue, puis étapes de supervision, comme après un dev. Sans
+   `.devbots/cr.md`, la revue juge sur le diff seul.
+5. Rien de bloquant : la story passe « À valider ». Ta revue, tes retours et
+   ton feu vert (merge) se passent comme pour les autres.
+6. Des corrections demandées : la story se bloque, corrections dans le
+   rapport. « Relancer » les confie à un agent de dev, dont tu choisis le
+   modèle ; aucun agent de dev ne part sans toi.
+
 ## Usage Claude
 
 La vue « Usage Claude », sous le flux dans le panneau DevBots, montre ce que

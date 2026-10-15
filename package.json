@@ -357,6 +357,11 @@
         "icon": "$(debug-restart)"
       },
       {
+        "command": "devbots.superviseExisting",
+        "title": "DevBots : faire superviser le dev existant (puis À valider)",
+        "icon": "$(shield)"
+      },
+      {
         "command": "devbots.dequeue",
         "title": "DevBots : retirer du flux de dev"
       },
@@ -637,6 +642,11 @@
           "command": "devbots.alreadyDone",
           "when": "view == devbots.flow && viewItem =~ /^story:(new|ready)(?!.*:verifying)/",
           "group": "8_flow@4"
+        },
+        {
+          "command": "devbots.superviseExisting",
+          "when": "view == devbots.flow && viewItem =~ /^story:(ready(?!.*:verifying)|dev:blocked)/",
+          "group": "8_flow@5"
         },
         {
           "command": "devbots.openVerification",

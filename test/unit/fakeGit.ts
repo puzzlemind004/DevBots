@@ -52,6 +52,14 @@ export class FakeGit implements StoryGit {
     return this.checkouts.get(path.resolve(this.repoRoot))!;
   }
 
+  async branchExists(name: string): Promise<boolean> {
+    return this.branches.has(name);
+  }
+
+  async checkedOutIn(branch: string): Promise<string | undefined> {
+    return [...this.checkouts].find(([, b]) => b === branch)?.[0];
+  }
+
   async ensureBranch(name: string, from: string): Promise<boolean> {
     if (this.branches.has(name)) {
       return false;

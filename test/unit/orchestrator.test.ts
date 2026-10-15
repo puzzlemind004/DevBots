@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { FlowStateStore, FlowStatus } from '../../src/core/flowState.js';
 import type { DevSettings, Orchestrator, OrchestratorEvent } from '../../src/core/orchestrator.js';
+import { featureBranchName, storyBranchName } from '../../src/core/git.js';
 import { DEV_SCHEMA, ISSUES_SCHEMA, REVIEW_SCHEMA } from '../../src/core/supervision.js';
 import type { FakeGit } from './fakeGit.js';
 import { approved, devWrites, Harness, noIssues, type FakeClaude } from './orchestratorHarness.js';
@@ -344,6 +345,75 @@ describe('Orchestrator', () => {
     });
     expect(await orchestrator.recover()).toEqual(['42']);
     expect((await store.read()).stories['42']).toMatchObject({ status: 'blocked' });
+  });
+
+  describe('dev fait hors de DevBots', () => {
+    /** La branche de la story 42 et son worktree, avec un fichier modifié sans commit si `file` est donné. */
+    async function existingWork(file?: string): Promise<string> {
+      const feature = featureBranchName('LOCAL-F1', 'Inscription');
+      await fakeGit.ensureBranch(feature, 'main');
+      const dir = path.join(h.root, 'ailleurs', '42');
+      await fakeGit.ensureWorktree(dir, storyBranchName('42', 'Story 42'), feature);
+      if (file) {
+        await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+        await fs.writeFile(path.join(dir, file), 'export const ok = true;\n', 'utf8');
+      }
+      return dir;
+    }
+
+    it('supervise la branche sans session de dev, puis attend ta revue', async () => {
+      await addReady('42', ['src/email.ts']);
+      const dir = await existingWork('src/email.ts');
+      claude.review.push(approved);
+      claude.steps.push(noIssues);
+
+      await orchestrator.enqueueSupervision('42', 'sonnet');
+      expect(await settle('42')).toBe('awaiting_human');
+
+      expect(claude.requests.map((r) => r.schema)).toEqual([REVIEW_SCHEMA, ISSUES_SCHEMA]);
+      expect(claude.requests[0]!.prompt).toContain('fait hors de DevBots');
+      expect(claude.requests[0]!.prompt).toContain('Pas de CR');
+      expect(claude.requests[1]!.prompt).not.toContain('cr.md');
+      const run = (await store.read()).stories['42']!;
+      expect(run.worktree).toBe(path.resolve(dir));
+      expect(run.supervisionOnly).toBeUndefined();
+      expect(fakeGit.log(run.branch, 1)).toEqual(['42 : travail en cours, repris pour la supervision']);
+    });
+
+    it('se bloque sur les corrections demandées, et la relance les confie à un agent de dev', async () => {
+      await addReady('42', ['src/email.ts']);
+      await existingWork('src/email.ts');
+      claude.review.push(approved);
+      claude.steps.push(() => ({ summary: '', issues: [FUITE] }));
+
+      await orchestrator.enqueueSupervision('42', 'sonnet');
+      expect(await settle('42', 'blocked')).toBe('blocked');
+      const blocked = (await store.read()).stories['42']!;
+      expect(blocked.reason).toContain('La supervision demande des corrections');
+      expect(blocked.pendingCorrections).toContain('Fuite');
+      expect(claude.requests.some((r) => r.schema === DEV_SCHEMA)).toBe(false);
+
+      claude.dev.push(devWrites('src/email.ts', 'export const ok = 2;\n'));
+      claude.steps.push(noIssues);
+      await orchestrator.retry('42');
+      expect(await settle('42')).toBe('awaiting_human');
+      expect(claude.requests.find((r) => r.schema === DEV_SCHEMA)!.prompt).toContain('Fuite (src/email.ts:3)');
+    });
+
+    it("bloque une branche qui n'apporte rien à sa base", async () => {
+      await addReady('42', ['src/email.ts']);
+      await existingWork();
+      await orchestrator.enqueueSupervision('42', 'sonnet');
+      expect(await settle('42', 'blocked')).toBe('blocked');
+      expect((await store.read()).stories['42']!.reason).toContain('pas de dev à superviser');
+      expect(claude.requests).toHaveLength(0);
+    });
+
+    it("refuse une story sans branche", async () => {
+      await addReady('42', ['src/email.ts']);
+      await expect(orchestrator.enqueueSupervision('42', 'sonnet')).rejects.toThrow("La branche story/42-story-42 n'existe pas");
+      expect((await store.read()).stories['42']).toBeUndefined();
+    });
   });
 
   describe('revue humaine', () => {

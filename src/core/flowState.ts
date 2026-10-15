@@ -98,6 +98,12 @@ export interface StoryRun {
    * relire. Effacé à « À valider » et à chaque nouveau travail demandé.
    */
   verification?: Verification;
+  /**
+   * Le dev a été fait hors de DevBots, sur la branche de la story : pas de
+   * session de dev, la revue et la supervision relisent ce travail. Effacé à
+   * « À valider », ou dès que des corrections sont à confier à un agent.
+   */
+  supervisionOnly?: boolean;
   /** Coût estimé des sessions depuis le dernier lancement, comparé au budget de la story. */
   costUsd?: number;
   /** Fiches créées par le tri des problèmes. */

@@ -100,6 +100,7 @@ export class DevController implements vscode.Disposable {
       vscode.commands.registerCommand('devbots.startDev', (node?: FlowNode) => this.startDev(node)),
       vscode.commands.registerCommand('devbots.stopDev', (node?: FlowNode) => this.stopDev(node)),
       vscode.commands.registerCommand('devbots.retryDev', (node?: FlowNode) => this.retryDev(node)),
+      vscode.commands.registerCommand('devbots.superviseExisting', (node?: FlowNode) => this.superviseExisting(node)),
       vscode.commands.registerCommand('devbots.dequeue', (node?: FlowNode) => this.dequeue(node)),
       vscode.commands.registerCommand('devbots.showJournal', (node?: FlowNode) => this.showJournal(node)),
       vscode.commands.registerCommand('devbots.openReport', (node?: FlowNode) => this.openRunFile(node, 'report')),
@@ -184,6 +185,44 @@ export class DevController implements vscode.Disposable {
     if (model) {
       await this.guard(() => this.orchestrator.retry(run.storyId, model));
     }
+  }
+
+  /**
+   * Une story de Ready, ou bloquée, dont le dev est déjà sur sa branche de
+   * story : sans agent de dev, la revue et la supervision le relisent, et elle
+   * passe « À valider » si tout va bien.
+   */
+  private async superviseExisting(node?: FlowNode): Promise<void> {
+    const story = node?.kind === 'story' ? node.story : await this.pickStory('ready', 'Quel dev faire superviser ?');
+    if (!story) {
+      return;
+    }
+    if (story.folder !== 'ready') {
+      vscode.window.showInformationMessage('Seules les stories de Ready se font superviser.');
+      return;
+    }
+    const id = story.frontmatter.source_id;
+    if (!(await this.closeAgentDiscussion(id))) {
+      return;
+    }
+    const confirmed = await vscode.window.showInformationMessage(
+      `Faire superviser le dev existant de ${id} — ${story.title} ?`,
+      {
+        modal: true,
+        detail: [
+          "Pas de session de dev : DevBots reprend la branche de la story et son worktree, commite ce qui n'y est pas encore, puis lance les checks, la revue et les étapes de supervision.",
+          'Si tout va bien, la story passe « À valider » : ta revue, puis ton feu vert la merge comme les autres.',
+          'Sinon elle se bloque avec les corrections demandées : la relancer les confie à un agent de dev.'
+        ].join('\n')
+      },
+      'Superviser'
+    );
+    if (confirmed !== 'Superviser') {
+      return;
+    }
+    // Le modèle servira à l'agent de dev, si des corrections lui sont confiées à la relance.
+    const model = readConfig(this.ctx.repoUri).devModel || story.frontmatter.recommended_model || 'sonnet';
+    await this.guard(() => this.orchestrator.enqueueSupervision(id, model));
   }
 
   private async dequeue(node?: FlowNode): Promise<void> {
@@ -388,11 +427,24 @@ export class DevController implements vscode.Disposable {
           label: '$(search) Faire vérifier par un agent avant',
           detail: `Un agent en lecture seule cherche dans le dépôt (branche extraite, historique git) le code de chaque critère. Done s'il le confirme ; sinon la story reste ${where}, avec son rapport.`,
           value: 'verify' as const
-        }
+        },
+        ...(story.folder === 'ready'
+          ? [
+              {
+                label: '$(shield) Faire superviser, puis À valider',
+                detail: 'Le dev est sur la branche de la story : revue et supervision le relisent, puis ta revue et ton feu vert le mergent.',
+                value: 'supervise' as const
+              }
+            ]
+          : [])
       ],
       { title: `${id} — ${story.title} : déjà fait`, ignoreFocusOut: true }
     );
     if (!choice) {
+      return;
+    }
+    if (choice.value === 'supervise') {
+      await this.superviseExisting({ kind: 'story', group: 'ready', story });
       return;
     }
     const hint = await vscode.window.showInputBox({

@@ -56,6 +56,8 @@ export interface FileChange {
 export type StoryGit = Pick<
   Git,
   | 'currentBranch'
+  | 'branchExists'
+  | 'checkedOutIn'
   | 'ensureBranch'
   | 'ensureWorktree'
   | 'exclude'
