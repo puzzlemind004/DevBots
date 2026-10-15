@@ -78,7 +78,7 @@ export async function codeCheckout(
   const ref = options.feature && (await git.branchExists(baseBranch)) ? baseBranch : base;
   if (!options.feature) {
     const checkedOut = await git.checkedOutIn(ref);
-    if (checkedOut && samePath(checkedOut, options.repoRoot)) {
+    if (checkedOut && (await sameDir(checkedOut, options.repoRoot))) {
       return { dir: options.repoRoot, ref, detached: false };
     }
   }
@@ -101,6 +101,16 @@ export async function removeReadCheckout(
     return;
   }
   await git.removeWorktree(dir);
+}
+
+/**
+ * Deux chemins vers le même dossier existant, même écrits autrement : git rend
+ * le chemin réel, alors que le dépôt peut avoir été ouvert par une jonction, un
+ * lecteur `subst` ou un nom court 8.3 (`C:\Users\QUENTI~1`, fréquent dans `%TEMP%`).
+ */
+async function sameDir(a: string, b: string): Promise<boolean> {
+  const real = (p: string) => fs.realpath(p).catch(() => p);
+  return samePath(await real(a), await real(b));
 }
 
 /** Deux chemins vers le même dossier. Sous Windows, la casse ne compte pas (`c:` et `C:`). */
