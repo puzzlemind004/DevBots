@@ -98,6 +98,25 @@ sans `cd`.
   mergée.
 - Une dépendance absente du flux est attendue, et signalée comme telle.
 
+### Ordre de lancement dans Ready
+
+Le panneau range Ready par étapes, d'après ces mêmes règles :
+
+- **Étape 1 · maintenant** : ce qui peut partir tout de suite, ensemble.
+  Aucune dépendance à attendre, aucun fichier commun, ni entre ces stories ni
+  avec une story en cours ou en file.
+- **Étape 2, 3…** : ce qui partira une fois mergé ce qu'elles attendent. Les
+  stories d'une même étape peuvent partir ensemble. Attendre une story en
+  cours, ou une story encore dans New, place à l'étape 2 au moins.
+- **Bloquées** : une dépendance absente du flux, un cycle de dépendances, ou
+  une story qui en attend une de ce genre. « Trancher une dépendance » les
+  débloque.
+
+Deux stories qui partagent un fichier ne sont jamais à la même étape : la plus
+prioritaire dans la source garde sa place, à défaut le plus petit identifiant.
+Chaque story dit ce qu'elle attend, en description et au survol. Quand tout
+peut partir maintenant, Ready reste une simple liste.
+
 ## Ce que l'agent de dev peut faire
 
 | Outil | Limite |

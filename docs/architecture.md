@@ -25,7 +25,7 @@ src/
 │   ├── initSkill.ts    Le skill devbots-init : assemblage et dépôt dans .claude/skills/
 │   ├── planning.ts     L'atelier de planification, sans interface
 │   ├── flowState.ts    state.json : le parcours des stories après Ready
-│   ├── schedule.ts     Ordonnancement : dépendances retenues, fichiers occupés
+│   ├── schedule.ts     Ordonnancement : dépendances retenues, fichiers occupés, étapes de Ready
 │   ├── git.ts          Branches, worktrees, commits, diff, intégration, fast-forward
 │   ├── devEnv.ts       Installation des dépendances, commandes autorisées
 │   ├── supervision.ts  supervision.json, schémas, tri, fiches du tri, rapport

@@ -3,14 +3,15 @@
  *
  * New, Ready et Done se lisent dans les dossiers ; « En dev » et « À valider »
  * dans `state.json`. Une story de `ready/` partie en dev quitte Ready pour le
- * groupe de son état. Dans New, les stories d'une feature sont rangées sous elle.
+ * groupe de son état. Dans New, les stories d'une feature sont rangées sous elle ;
+ * dans Ready, les stories sont rangées par étape de lancement.
  */
 
 import * as vscode from 'vscode';
 import type { FeatureFile, StoryFile, WorkDir } from '../core/workDir.js';
 import { PlanStore, type PlanningPhase } from '../core/planStore.js';
 import { FlowStateStore, statusLabel, type FlowState, type FlowStatus, type StoryRun } from '../core/flowState.js';
-import { dependencyView, schedulable } from '../core/schedule.js';
+import { dependencyView, readyOrder, schedulable, type ReadyPlace, type SchedulableStory } from '../core/schedule.js';
 import { runDocs, type RunDocKind } from '../core/runDocs.js';
 
 /** Les groupes du panneau, dans l'ordre du flux. */
@@ -37,8 +38,8 @@ function groupOf(status: FlowStatus): FlowGroup {
   }
 }
 
-/** Un nœud de l'arbre : un groupe, une feature, ou une story. */
-export type FlowNode = GroupNode | FeatureNode | StoryNode;
+/** Un nœud de l'arbre : un groupe, une feature, une étape de Ready, ou une story. */
+export type FlowNode = GroupNode | FeatureNode | StepNode | StoryNode;
 
 export interface GroupNode {
   kind: 'group';
@@ -55,6 +56,14 @@ export interface FeatureNode {
   stories: StoryNode[];
 }
 
+/** Une étape de lancement dans Ready : ses stories peuvent partir ensemble. */
+export interface StepNode {
+  kind: 'step';
+  /** `null` : les stories qui ne partiront pas sans ton arbitrage. */
+  step: number | null;
+  stories: StoryNode[];
+}
+
 export interface StoryNode {
   kind: 'story';
   story: StoryFile;
@@ -63,6 +72,8 @@ export interface StoryNode {
   planning?: PlanningPhase;
   /** Son parcours après Ready, quand elle est partie en dev. */
   run?: StoryRun;
+  /** Sa place dans l'ordre de lancement, pour une story de Ready pas encore partie. */
+  place?: ReadyPlace;
   /** Dépendances infirmées par le plan : « parallélisable d'après le code ». */
   parallelizable?: string[];
   /** Un agent vérifie en ce moment que son dev est déjà fait. */
@@ -97,10 +108,13 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
     if (!element) {
       return this.groups();
     }
-    if (element.kind === 'feature') {
+    if (element.kind === 'feature' || element.kind === 'step') {
       return element.stories;
     }
     if (element.kind === 'group') {
+      if (element.group === 'ready') {
+        return readySteps(element.stories);
+      }
       if (element.group !== 'new') {
         return element.stories;
       }
@@ -123,6 +137,8 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
         return groupItem(node);
       case 'feature':
         return featureItem(node);
+      case 'step':
+        return stepItem(node);
       case 'story':
         return storyItem(node);
     }
@@ -132,10 +148,20 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
     const state = await this.readState();
     const phases = await new PlanStore(this.workDir.plansPath()).listPhases();
     const byGroup = new Map<FlowGroup, StoryNode[]>(GROUPS.map((g) => [g.group, []]));
+    const knownIds = new Set<string>();
+    const doneIds = new Set<string>();
+    const readyStories = new Map<string, SchedulableStory>();
 
     for (const folder of ['new', 'ready', 'done'] as const) {
       for (const story of await this.workDir.listStories(folder)) {
         const id = story.frontmatter.source_id;
+        knownIds.add(id);
+        if (folder === 'done') {
+          doneIds.add(id);
+        }
+        if (folder === 'ready') {
+          readyStories.set(id, schedulable(story.frontmatter));
+        }
         // Une story mergée garde son parcours : CR, rapport, journal et diff restent consultables.
         const run = folder === 'new' ? undefined : state.stories[id];
         const group: FlowGroup = run && folder === 'ready' ? groupOf(run.status) : folder;
@@ -153,6 +179,16 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
               : undefined
         });
       }
+    }
+
+    // L'ordre de lancement de ce qui attend dans Ready, la priorité de la source d'abord.
+    const waiting = byGroup.get('ready')!;
+    const places = readyOrder(
+      { state, doneIds, knownIds, stories: readyStories },
+      [...waiting].sort(byPriority).map((n) => n.story.frontmatter.source_id)
+    );
+    for (const node of waiting) {
+      node.place = places.get(node.story.frontmatter.source_id);
     }
 
     const features = await this.workDir.listFeatures();
@@ -179,6 +215,52 @@ export class FlowTreeProvider implements vscode.TreeDataProvider<FlowNode> {
 function parentOf(node: StoryNode): string | undefined {
   const parent = node.story.frontmatter.parent;
   return parent === undefined || parent === null ? undefined : String(parent);
+}
+
+/** Priorité de la source (1 d'abord), sans priorité en dernier ; le tri est stable. */
+function byPriority(a: StoryNode, b: StoryNode): number {
+  const pa = a.story.frontmatter.priority ?? Number.POSITIVE_INFINITY;
+  const pb = b.story.frontmatter.priority ?? Number.POSITIVE_INFINITY;
+  return pa === pb ? 0 : pa < pb ? -1 : 1;
+}
+
+/**
+ * Les stories de Ready rangées par étape de lancement. Quand tout peut partir
+ * maintenant, la liste suffit.
+ */
+function readySteps(stories: StoryNode[]): FlowNode[] {
+  const byStep = new Map<number | null, StoryNode[]>();
+  for (const node of stories) {
+    const step = node.place?.step ?? null;
+    byStep.set(step, [...(byStep.get(step) ?? []), node]);
+  }
+  if (byStep.size === 1 && byStep.has(1)) {
+    return stories;
+  }
+  const order = [...byStep.keys()].sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
+  return order.map((step) => ({ kind: 'step', step, stories: byStep.get(step)! }));
+}
+
+const STEP_TOOLTIPS = {
+  now: "Elles peuvent partir dès maintenant, ensemble : aucune dépendance à attendre, aucun fichier en commun, ni entre elles ni avec une story en cours. Le plafond d'agents s'applique.",
+  later: "Elles partiront une fois mergées celles qu'elles attendent, aux étapes précédentes. Elles peuvent partir ensemble : aucune n'attend l'autre, aucune ne partage de fichier avec une autre.",
+  blocked: "Elles ne partiront pas seules : une dépendance est absente du flux, ou des stories s'attendent en boucle. « Trancher une dépendance », au clic droit sur la story, lève l'attente."
+};
+
+function stepItem(node: StepNode): vscode.TreeItem {
+  const label = node.step === null ? 'Bloquées' : node.step === 1 ? 'Étape 1 · maintenant' : `Étape ${node.step}`;
+  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
+  const count = node.stories.length;
+  item.description = node.step === null ? 'à arbitrer' : count > 1 ? `${count} en parallèle` : '1 story';
+  item.contextValue = 'step';
+  if (node.step === null) {
+    item.iconPath = new vscode.ThemeIcon('circle-slash', new vscode.ThemeColor('list.warningForeground'));
+    item.tooltip = STEP_TOOLTIPS.blocked;
+  } else {
+    item.iconPath = new vscode.ThemeIcon(node.step === 1 ? 'run-all' : 'debug-step-over');
+    item.tooltip = node.step === 1 ? STEP_TOOLTIPS.now : STEP_TOOLTIPS.later;
+  }
+  return item;
 }
 
 function groupItem(node: GroupNode): vscode.TreeItem {
@@ -337,7 +419,9 @@ function storyItem(node: StoryNode): vscode.TreeItem {
       story.frontmatter.origin ? 'checklist' : story.frontmatter.source === 'local' ? 'edit' : 'file'
     );
     const model = node.group === 'ready' ? story.frontmatter.recommended_model : undefined;
-    item.description = [badge.replace(/ · $/, ''), model].filter(Boolean).join(' · ') || undefined;
+    const waitsFor = node.place?.reasons ?? [];
+    const firstWait = waitsFor.length > 0 ? `${waitsFor[0]}${waitsFor.length > 1 ? ' …' : ''}` : undefined;
+    item.description = [badge.replace(/ · $/, ''), firstWait ?? model].filter(Boolean).join(' · ') || undefined;
     item.tooltip = new vscode.MarkdownString(
       [
         `**${story.title}**`,
@@ -355,13 +439,22 @@ function storyItem(node: StoryNode): vscode.TreeItem {
         node.parallelizable?.length
           ? `- Parallélisable d'après le code : ${node.parallelizable.join(', ')} (le plan ne trouve aucun fichier commun)`
           : undefined,
-        model ? `- Modèle recommandé : ${model}` : undefined
+        model ? `- Modèle recommandé : ${model}` : undefined,
+        node.place ? `\n${placeLine(node.place)}` : undefined,
+        ...waitsFor.map((reason) => `- ${reason}`)
       ]
         .filter(Boolean)
         .join('\n')
     );
   }
   return item;
+}
+
+function placeLine(place: ReadyPlace): string {
+  if (place.step === null) {
+    return '**Ne partira pas sans ton arbitrage :**';
+  }
+  return place.step === 1 ? '**Étape 1** : peut partir maintenant.' : `**Étape ${place.step}** :`;
 }
 
 function runTooltip(story: StoryFile, run: StoryRun): vscode.MarkdownString {

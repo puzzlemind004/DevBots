@@ -5,6 +5,7 @@ import {
   dependencyView,
   normalizeFile,
   pickNext,
+  readyOrder,
   schedulable,
   type ScheduleContext,
   type SchedulableStory
@@ -131,5 +132,76 @@ describe('pickNext', () => {
     const state = emptyFlowState();
     state.stories['1'] = run('1', 'queued');
     expect(pickNext(ctx([], state), 2).waiting.get('1')).toBe('fiche absente de ready/');
+  });
+});
+
+describe('readyOrder', () => {
+  const steps = (c: ScheduleContext, ids: string[]): Record<string, number | null> =>
+    Object.fromEntries([...readyOrder(c, ids)].map(([id, p]) => [id, p.step]));
+
+  it('met à la même étape ce qui peut partir ensemble', () => {
+    const c = ctx([story('1', { files: ['a.ts'] }), story('2', { files: ['b.ts'] })]);
+    expect(steps(c, ['1', '2'])).toEqual({ '1': 1, '2': 1 });
+    expect(readyOrder(c, ['1']).get('1')!.reasons).toEqual([]);
+  });
+
+  it('place une story après la dépendance qu’elle attend, en chaîne', () => {
+    const c = ctx([
+      story('1'),
+      story('2', { declared: ['1'], confirmed: ['1'] }),
+      story('3', { declared: ['2'] }),
+      story('4', { declared: ['1'], refuted: ['1'] })
+    ]);
+    expect(steps(c, ['3', '2', '1', '4'])).toEqual({ '1': 1, '2': 2, '3': 3, '4': 1 });
+    expect(readyOrder(c, ['1', '2', '3', '4']).get('3')!.reasons).toEqual(['attend 2']);
+  });
+
+  it('ne met jamais à la même étape deux stories aux fichiers communs ; la première garde sa place', () => {
+    const c = ctx([story('1', { files: ['a.ts'] }), story('2', { files: ['a.ts', 'b.ts'] }), story('3', { files: ['b.ts'] })]);
+    expect(steps(c, ['2', '1', '3'])).toEqual({ '2': 1, '1': 2, '3': 2 });
+    expect(steps(c, ['1', '2', '3'])).toEqual({ '1': 1, '2': 2, '3': 1 });
+    expect(readyOrder(c, ['1', '2', '3']).get('2')!.reasons).toEqual(['après 1, fichiers communs : a.ts']);
+  });
+
+  it('repousse à l’étape 2 ce qui attend une story en cours ou partage ses fichiers', () => {
+    const state = emptyFlowState();
+    state.stories['9'] = run('9', 'in_dev');
+    state.stories['8'] = run('8', 'queued');
+    const c = ctx(
+      [story('9', { files: ['a.ts'] }), story('8'), story('1', { files: ['a.ts'] }), story('2', { declared: ['8'] }), story('3')],
+      state
+    );
+    expect(steps(c, ['1', '2', '3'])).toEqual({ '1': 2, '2': 2, '3': 1 });
+    expect(readyOrder(c, ['1']).get('1')!.reasons).toEqual(['fichiers communs avec 9, en cours : a.ts']);
+    expect(readyOrder(c, ['2']).get('2')!.reasons).toEqual(['attend 8, en cours']);
+  });
+
+  it("ignore les dépendances mergées et suit tes arbitrages", () => {
+    const state = emptyFlowState();
+    state.dependencyOverrides['2'] = { '1': 'ignore' };
+    const c = ctx([story('1'), story('2', { declared: ['1'] }), story('3', { declared: ['0'] })], state, ['0']);
+    expect(steps(c, ['1', '2', '3'])).toEqual({ '1': 1, '2': 1, '3': 1 });
+  });
+
+  it('attend une story encore dans New', () => {
+    const c = ctx([story('2', { declared: ['1'] })]);
+    const known = { ...c, knownIds: new Set(['1', '2']) };
+    expect(readyOrder(known, ['2']).get('2')).toEqual({ step: 2, reasons: ['attend 1, pas encore planifiée'] });
+  });
+
+  it('écarte une dépendance absente du flux, un cycle, et ce qui en dépend', () => {
+    const c = ctx([
+      story('1', { declared: ['99'] }),
+      story('2', { declared: ['1'] }),
+      story('3', { declared: ['4'] }),
+      story('4', { declared: ['3'] }),
+      story('5', { declared: ['3'] }),
+      story('6')
+    ]);
+    expect(steps(c, ['1', '2', '3', '4', '5', '6'])).toEqual({ '1': null, '2': null, '3': null, '4': null, '5': null, '6': 1 });
+    const order = readyOrder(c, ['1', '2', '3', '4', '5', '6']);
+    expect(order.get('1')!.reasons).toEqual(['attend 99, absente du flux']);
+    expect(order.get('3')!.reasons).toEqual(['attend 4', 'cycle de dépendances avec 4']);
+    expect(order.get('5')!.reasons).toEqual(['attend 3', 'attend un cycle de dépendances']);
   });
 });

@@ -153,7 +153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           : node?.kind === 'feature'
             ? node.feature.frontmatter.web_url
             : undefined;
-      if (node?.kind === 'group') {
+      if (node?.kind === 'group' || node?.kind === 'step') {
         return;
       }
       if (!url) {

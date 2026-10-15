@@ -104,10 +104,9 @@ export function blockers(
     if (other.storyId === story.id) {
       continue;
     }
-    const theirs = ctx.stories.get(other.storyId)?.files ?? [];
-    const common = story.files.filter((f) => theirs.includes(f));
+    const common = commonFiles(story, ctx.stories.get(other.storyId));
     if (common.length > 0) {
-      reasons.push(`fichiers communs avec ${other.storyId} : ${common.slice(0, 3).join(', ')}${common.length > 3 ? '…' : ''}`);
+      reasons.push(`fichiers communs avec ${other.storyId} : ${shortList(common)}`);
     }
   }
   return reasons;
@@ -174,4 +173,138 @@ function strings(value: unknown): string[] {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+/** La place d'une story de Ready dans l'ordre de lancement. */
+export interface ReadyPlace {
+  /**
+   * 1 : peut partir maintenant. n : après les stories qu'elle attend.
+   * `null` : ne partira pas sans ton arbitrage (dépendance absente du flux,
+   * cycle de dépendances, ou dépendance elle-même dans ce cas).
+   */
+  step: number | null;
+  /** Ce qu'elle attend, en phrases. Vide à l'étape 1. */
+  reasons: string[];
+}
+
+/**
+ * L'ordre de lancement des stories de Ready qui ne sont pas encore parties.
+ *
+ * Les stories d'une même étape peuvent partir ensemble : aucune n'attend
+ * l'autre, aucune ne partage de fichier avec une autre. L'étape 1 est ce que
+ * `blockers` laisse partir aujourd'hui ; les suivantes supposent les
+ * précédentes mergées. Une story en file compte comme partie : ses fichiers
+ * sont pris.
+ *
+ * Attendre une story en dev, en file ou encore dans New repousse à l'étape 2,
+ * comme partager un fichier avec une story en dev. Deux stories qui partagent
+ * un fichier ne sont jamais à la même étape : la première de `ids` garde sa
+ * place, l'autre descend.
+ *
+ * @param ids Les stories à placer, toutes présentes dans `ctx.stories`, dans
+ * l'ordre de préférence.
+ */
+export function readyOrder(ctx: ScheduleContext, ids: string[]): Map<string, ReadyPlace> {
+  const pending = new Set(ids);
+  const committed = Object.values(ctx.state.stories).filter(
+    (r) => r.status === 'queued' || ACTIVE_STATUSES.includes(r.status)
+  );
+  const places = new Map<string, ReadyPlace>();
+  const steps = new Map<string, number>();
+  const waits = new Map<string, string[]>();
+  const floors = new Map<string, number>();
+  const reasons = new Map<string, string[]>();
+
+  for (const id of ids) {
+    const story = ctx.stories.get(id)!;
+    const view = dependencyView(story, ctx.state.dependencyOverrides[id]);
+    const open = view.waitOn.filter((d) => !ctx.doneIds.has(d));
+    waits.set(id, open.filter((d) => pending.has(d)));
+    const said: string[] = [];
+    let blocked = false;
+    for (const dep of open.filter((d) => !pending.has(d))) {
+      if (!ctx.knownIds.has(dep)) {
+        blocked = true;
+        said.push(`attend ${dep}, absente du flux`);
+      } else if (committed.some((r) => r.storyId === dep)) {
+        said.push(`attend ${dep}, en cours`);
+      } else {
+        said.push(`attend ${dep}, pas encore planifiée`);
+      }
+    }
+    for (const run of committed) {
+      const common = commonFiles(story, ctx.stories.get(run.storyId));
+      if (run.storyId !== id && common.length > 0) {
+        said.push(`fichiers communs avec ${run.storyId}, en cours : ${shortList(common)}`);
+      }
+    }
+    reasons.set(id, said);
+    if (blocked) {
+      places.set(id, { step: null, reasons: said });
+    } else {
+      floors.set(id, said.length > 0 ? 2 : 1);
+    }
+  }
+
+  // Tri topologique : à chaque tour, la story prête à placer de plus petite
+  // étape, la première de `ids` à égalité.
+  const settled = (dep: string): boolean => places.has(dep);
+  let remaining = ids.filter((id) => !places.has(id));
+  for (;;) {
+    const available = remaining.filter((id) => waits.get(id)!.every(settled));
+    if (available.length === 0) {
+      break;
+    }
+    const stepOf = (id: string): number =>
+      Math.max(floors.get(id)!, ...waits.get(id)!.map((d) => (steps.get(d) ?? 0) + 1));
+    const next = available.reduce((best, id) => (stepOf(id) < stepOf(best) ? id : best));
+    remaining = remaining.filter((id) => id !== next);
+
+    const said = reasons.get(next)!;
+    const deps = waits.get(next)!;
+    said.push(...deps.map((d) => `attend ${d}`));
+    if (deps.some((d) => places.get(d)!.step === null)) {
+      places.set(next, { step: null, reasons: said });
+      continue;
+    }
+    const story = ctx.stories.get(next)!;
+    let step = stepOf(next);
+    for (;;) {
+      const clash = [...steps].find(([other, s]) => s === step && commonFiles(story, ctx.stories.get(other)).length > 0);
+      if (!clash) {
+        break;
+      }
+      said.push(`après ${clash[0]}, fichiers communs : ${shortList(commonFiles(story, ctx.stories.get(clash[0])))}`);
+      step += 1;
+    }
+    steps.set(next, step);
+    places.set(next, { step, reasons: said });
+  }
+
+  // Ce qui reste s'attend en boucle, ou attend une story qui s'attend en boucle.
+  const reaches = (from: string, target: string, seen = new Set<string>()): boolean =>
+    waits.get(from)!.some(
+      (d) => d === target || (remaining.includes(d) && !seen.has(d) && reaches(d, target, seen.add(d)))
+    );
+  for (const id of remaining) {
+    const looped = waits.get(id)!.filter((d) => remaining.includes(d) && reaches(d, id));
+    places.set(id, {
+      step: null,
+      reasons: [
+        ...reasons.get(id)!,
+        ...waits.get(id)!.map((d) => `attend ${d}`),
+        looped.length > 0 ? `cycle de dépendances avec ${looped.join(', ')}` : 'attend un cycle de dépendances'
+      ]
+    });
+  }
+  return places;
+}
+
+function commonFiles(story: SchedulableStory, other: SchedulableStory | undefined): string[] {
+  const theirs = other?.files ?? [];
+  return story.files.filter((f) => theirs.includes(f));
+}
+
+function shortList(files: string[]): string {
+  return `${files.slice(0, 3).join(', ')}${files.length > 3 ? '…' : ''}`;
 }
