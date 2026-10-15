@@ -23,6 +23,7 @@ import {
   type ClaudeStreamRequest,
   type ClaudeStreamRunner
 } from './claudeCli.js';
+import { storyBase } from './codeCheckout.js';
 import { bashRules, DENIED_COMMANDS, installSteps } from './devEnv.js';
 import {
   RUNNING_STATUSES,
@@ -34,14 +35,13 @@ import {
   type Verification
 } from './flowState.js';
 import {
-  defaultWorktreeRoot,
   DEVBOTS_DIR,
-  featureBranchName,
   Git,
   GitError,
   type StoryGit,
   storyBranchName,
-  worktreeDir
+  worktreeDir,
+  worktreeRoot
 } from './git.js';
 import { fillTemplate } from './planRender.js';
 import { safeId } from './planStore.js';
@@ -615,18 +615,16 @@ export class Orchestrator {
     const current = (await this.deps.store.read()).stories[storyId]!;
 
     const feature = await this.deps.workDir.findFeature(story.frontmatter.parent);
-    const base = settings.baseBranch || (await this.git.currentBranch());
-    let baseBranch = base;
-    if (feature) {
-      baseBranch = featureBranchName(feature.frontmatter.source_id, feature.title);
-      if (await this.git.ensureBranch(baseBranch, base)) {
-        await this.journal(storyId, `Branche de feature ${baseBranch} créée depuis ${base}.`);
-      }
+    const { base, baseBranch } = await storyBase(
+      this.git,
+      settings.baseBranch,
+      feature ? { id: feature.frontmatter.source_id, title: feature.title } : undefined
+    );
+    if (feature && (await this.git.ensureBranch(baseBranch, base))) {
+      await this.journal(storyId, `Branche de feature ${baseBranch} créée depuis ${base}.`);
     }
     const branch = current.branch || storyBranchName(storyId, story.title);
-    const root = settings.worktreeRoot
-      ? path.resolve(this.deps.repoRoot, settings.worktreeRoot)
-      : defaultWorktreeRoot(this.deps.repoRoot);
+    const root = worktreeRoot(this.deps.repoRoot, settings.worktreeRoot);
     const dir = current.worktree || worktreeDir(root, storyId, story.title);
 
     const outcome = await this.git.ensureWorktree(dir, branch, baseBranch);

@@ -46,6 +46,11 @@ export function defaultWorktreeRoot(repoRoot: string): string {
   return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}.worktrees`);
 }
 
+/** La racine des worktrees : `devbots.worktrees.root`, relatif au dépôt, sinon celle par défaut. */
+export function worktreeRoot(repoRoot: string, setting: string): string {
+  return setting ? path.resolve(repoRoot, setting) : defaultWorktreeRoot(repoRoot);
+}
+
 export interface FileChange {
   status: 'added' | 'modified' | 'deleted';
   /** Relatif au dépôt, avec des barres obliques. */
@@ -141,6 +146,25 @@ export class Git {
       await this.run(['worktree', 'add', '-b', branch, dir, from]);
     }
     return 'created';
+  }
+
+  /**
+   * Un worktree détaché sur `ref`, pour lire le code sans toucher à aucune
+   * branche : créé au besoin, sinon ramené sur `ref`. Personne n'y écrit, rien
+   * n'y est installé.
+   */
+  async ensureDetachedWorktree(dir: string, ref: string): Promise<void> {
+    if (await isDirectory(dir)) {
+      if (!(await this.succeeds(['rev-parse', '--is-inside-work-tree'], dir))) {
+        throw new GitError(`${dir} existe mais n'est pas un worktree git.`);
+      }
+      await this.run(['checkout', '--quiet', '--force', '--detach', ref], dir);
+      return;
+    }
+    await fs.mkdir(path.dirname(dir), { recursive: true });
+    // Un dossier supprimé à la main reste inscrit et bloquerait `worktree add`.
+    await this.run(['worktree', 'prune']);
+    await this.run(['worktree', 'add', '--quiet', '--detach', dir, ref]);
   }
 
   headCommit(cwd = this.repoRoot): Promise<string> {

@@ -28,6 +28,12 @@ describe('buildClaudeArgs', () => {
     expect(args.join(' ')).toContain('--resume abc');
   });
 
+  it('ouvre les dossiers supplémentaires, un par option', () => {
+    const args = buildClaudeArgs({ ...base, addDirs: ['/repo/.work', '/autre'] });
+    expect(args.join(' ')).toContain('--add-dir /repo/.work --add-dir /autre');
+    expect(buildClaudeArgs(base)).not.toContain('--add-dir');
+  });
+
   it('plafonne les tours quand on le demande', () => {
     expect(buildClaudeArgs({ ...base, maxTurns: 40 }).join(' ')).toContain('--max-turns 40');
     expect(buildClaudeArgs(base)).not.toContain('--max-turns');

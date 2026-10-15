@@ -286,8 +286,10 @@ droit, « Déjà fait », puis au choix :
 Un champ facultatif demande où trouver le travail (branche, commit, PR,
 dossier). Il aide l'agent à chercher et reste dans la fiche, en `done_note`.
 
-L'agent tourne à la racine du dépôt, sur la branche extraite, avec le modèle
-de `devbots.supervision.model`. Il n'a que `Read`, `Grep`, `Glob` et
+L'agent lit le code de la branche de la story, comme la planification : celle
+de sa feature si elle existe, stories déjà mergées comprises, dans un worktree
+détaché `.verify-<id>` supprimé à la fin ; sinon le dépôt, sur la branche
+extraite. Il tourne avec le modèle de `devbots.supervision.model`. Il n'a que `Read`, `Grep`, `Glob` et
 `git log`, `git show`, `git diff`, `git branch`, `git grep`, `git status` :
 de quoi regarder l'historique et les autres branches, rien pour écrire. Il ne
 lance ni build ni tests : il juge sur le code. Pour chaque critère

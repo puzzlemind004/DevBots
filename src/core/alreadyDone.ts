@@ -13,6 +13,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { formatStreamEvent, type ClaudeStreamRunner } from './claudeCli.js';
+import { samePath, type CodeCheckout } from './codeCheckout.js';
 import { DENIED_COMMANDS } from './devEnv.js';
 import { safeId } from './planStore.js';
 import type { StoryFile, WorkDir } from './workDir.js';
@@ -95,7 +96,8 @@ export function parseVerification(value: unknown): Verification {
   return { verdict, summary: str(o.summary), criteria };
 }
 
-export function verificationPrompt(story: StoryFile, hint: string): string {
+/** @param ref La branche extraite dans le dossier courant, quand ce n'est pas celle du dépôt. */
+export function verificationPrompt(story: StoryFile, hint: string, ref?: string): string {
   const lines = [
     `La story ${story.frontmatter.source_id} — ${story.title} a déjà été développée, d'après l'utilisateur, hors du flux de DevBots.`,
     '',
@@ -108,7 +110,9 @@ export function verificationPrompt(story: StoryFile, hint: string): string {
   lines.push(
     'Vérifie dans le dépôt que ce travail est bien là :',
     '- pour chaque critère d’acceptation (ou, faute de critères, chaque attente de la description), cherche le code qui le réalise et, s’il y en a, les tests qui le couvrent ;',
-    '- le dossier courant est la branche actuellement extraite ; git log, git show, git diff, git branch et git grep te laissent regarder l’historique et les autres branches ;',
+    ref
+      ? `- le dossier courant contient le code de ${ref}, la branche sur laquelle cette story est développée ; git log, git show, git diff, git branch et git grep te laissent regarder l’historique et les autres branches ;`
+      : '- le dossier courant est la branche actuellement extraite ; git log, git show, git diff, git branch et git grep te laissent regarder l’historique et les autres branches ;',
     '- ne lance ni build ni tests : juge sur le code ;',
     '- un critère n’est « covered » que si tu as trouvé le code qui le réalise ; cite fichiers et lignes, ou commits.',
     '',
@@ -161,6 +165,8 @@ export function renderVerificationReport(
 
 export interface VerifyDeps {
   repoRoot: string;
+  /** Le code à vérifier : celui de la branche de la story (`codeCheckout`). Absent : `repoRoot`. */
+  code?: () => Promise<Pick<CodeCheckout, 'dir' | 'ref'>>;
   workDir: WorkDir;
   stream: ClaudeStreamRunner;
   model?: string;
@@ -170,8 +176,8 @@ export interface VerifyDeps {
 }
 
 /**
- * Fait vérifier une story par un agent en lecture seule, à la racine du
- * dépôt. Le rapport est écrit dans `runs/<id>/verification.md`, le fil de
+ * Fait vérifier une story par un agent en lecture seule, sur le code de sa
+ * branche. Le rapport est écrit dans `runs/<id>/verification.md`, le fil de
  * l'agent dans `runs/<id>/journal.log`. Ne déplace pas la fiche.
  */
 export async function verifyAlreadyDone(
@@ -195,9 +201,14 @@ export async function verifyAlreadyDone(
   };
 
   await journal(`Vérification « déjà fait », session neuve${hint.trim() ? ` — indication : ${hint.trim()}` : ''}.`);
+  const code = await deps.code?.();
+  const cwd = code?.dir ?? deps.repoRoot;
+  const inRepo = samePath(cwd, deps.repoRoot);
   const response = await deps.stream({
-    prompt: verificationPrompt(story, hint),
-    cwd: deps.repoRoot,
+    prompt: verificationPrompt(story, hint, inRepo ? undefined : code?.ref),
+    cwd,
+    // La fiche reste dans le `.work` du dépôt, absent d'un worktree.
+    addDirs: inRepo ? undefined : [deps.workDir.rootPath],
     schema: VERIFY_SCHEMA,
     model: deps.model || undefined,
     tools: VERIFY_TOOLS,
@@ -205,7 +216,7 @@ export async function verifyAlreadyDone(
     disallowedTools: DENIED_COMMANDS,
     appendSystemPrompt: VERIFY_SYSTEM_PROMPT,
     signal,
-    onEvent: (event) => void journal(formatStreamEvent(event).split(deps.repoRoot + path.sep).join(''))
+    onEvent: (event) => void journal(formatStreamEvent(event).split(cwd + path.sep).join(''))
   });
   for (const denial of response.permissionDenials ?? []) {
     await journal(`Refusé : ${denial}`);

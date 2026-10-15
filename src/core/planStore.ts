@@ -27,6 +27,8 @@ export interface PlanningState {
   title: string;
   /** Session Claude Code de l'atelier, reprise par `--resume`. */
   sessionId?: string;
+  /** Le dossier où tourne cette session : `--resume` ne la retrouve que là. Absent : la racine du dépôt. */
+  cwd?: string;
   phase: PlanningPhase;
   understanding?: Understanding;
   answers: Answers;

@@ -108,6 +108,24 @@ describe('vérification « déjà fait »', () => {
     expect((await workDir.listStories('ready'))).toHaveLength(1);
   });
 
+  it('vérifie sur le code de la branche de la story, la fiche lue dans le .work du dépôt', async () => {
+    const requests: ClaudeStreamRequest[] = [];
+    const stream = async (request: ClaudeStreamRequest): Promise<ClaudeResponse> => {
+      requests.push(request);
+      return { sessionId: 's1', output: { verdict: 'not_done', summary: 'Rien.', criteria: [] } };
+    };
+    const dir = path.join(root, 'worktrees', '.verify-42');
+    await verifyAlreadyDone(
+      { repoRoot: root, workDir, stream, code: async () => ({ dir, ref: 'feature/LOCAL-F1-inscription' }) },
+      story,
+      ''
+    );
+    const request = requests[0]!;
+    expect(request.cwd).toBe(dir);
+    expect(request.addDirs).toEqual([workDir.rootPath]);
+    expect(request.prompt).toContain('le code de feature/LOCAL-F1-inscription');
+  });
+
   it('sans indication, le prompt ne parle que de la fiche', () => {
     expect(verificationPrompt(story, '  ')).not.toContain("Indication de l'utilisateur");
   });

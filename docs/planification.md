@@ -37,6 +37,25 @@ On l'ouvre par l'ampoule d'une story de New dans le panneau, ou par la commande
    coup. « Passer en ready » génère la fiche depuis
    le gabarit et la place dans `ready/`.
 
+## Le code lu
+
+Claude lit le code de la branche sur laquelle la story sera développée, pas
+forcément celle extraite dans le dépôt :
+
+- story d'une feature : la branche de la feature dès qu'elle existe, avec les
+  stories déjà mergées ; avant, la branche d'où elle partira
+  (`devbots.git.baseBranch`, sinon la branche extraite) ;
+- story sans feature, sur la branche extraite : le dépôt lui-même.
+
+Hors du dépôt, ce code est extrait dans un worktree détaché,
+`.plan-<id>` sous la racine des worktrees, remis à jour avant chaque appel et
+sans installation de dépendances. Il est supprimé à la fermeture de l'onglet
+et au passage en ready. Les fiches restent lues dans le `.work` du dépôt.
+
+Claude range ses sessions par dossier : une session commencée dans un autre
+dossier (dans le dépôt, avant ce changement) ne peut pas reprendre dans le
+worktree. L'atelier le signale ; « Recommencer » ouvre une session neuve.
+
 ## Contrôles de forme
 
 | Contrôle | Gravité |

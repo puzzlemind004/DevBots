@@ -9,6 +9,8 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ClaudeError, createClaudeRunner } from '../core/claudeCli.js';
+import { codeCheckout, removeReadCheckout } from '../core/codeCheckout.js';
+import { Git, worktreeRoot } from '../core/git.js';
 import type { Answer, PlanSection } from '../core/plan.js';
 import { PLAN_SECTIONS, PlanShapeError } from '../core/plan.js';
 import { PlanningError, PlanningSession } from '../core/planning.js';
@@ -61,7 +63,26 @@ export class PlanningPanel {
       // Fermer l'onglet arrête l'appel en cours : rien ne tourne sans témoin.
       this.abort?.abort();
       PlanningPanel.open.delete(session.state.storyId);
+      void this.removeCheckout();
     });
+  }
+
+  /**
+   * Supprime le worktree où la planification lit le code, s'il y en a un. Il
+   * revient au même endroit à la réouverture : la session Claude y reprend.
+   */
+  private async removeCheckout(): Promise<void> {
+    const repoRoot = this.ctx.repoUri.fsPath;
+    try {
+      await removeReadCheckout(
+        new Git(repoRoot),
+        worktreeRoot(repoRoot, readConfig(this.ctx.repoUri).worktreeRoot),
+        this.session.state.storyId,
+        'plan'
+      );
+    } catch (err) {
+      this.ctx.log.warn(`Planification ${this.session.state.storyId} : worktree de lecture non supprimé : ${describe(err)}`);
+    }
   }
 
   /** Ouvre l'atelier d'une story, ou ramène au premier plan celui déjà ouvert. */
@@ -81,15 +102,29 @@ export class PlanningPanel {
     const workRoot = vscode.Uri.joinPath(ctx.repoUri, config.workDir).fsPath;
     const store = new PlanStore(path.join(workRoot, 'plans'));
     const feature = await new WorkDir(workRoot).findFeature(story.frontmatter.parent);
+    const repoRoot = ctx.repoUri.fsPath;
+    const git = new Git(repoRoot);
     const session = await PlanningSession.open(
       {
         store,
         runner: createClaudeRunner(config.claudeExecutable),
-        repoRoot: ctx.repoUri.fsPath,
+        repoRoot,
         settings: {
           skill: config.planningSkill,
           model: config.planningModel,
           maxResumes: config.planningMaxResumes
+        },
+        // Le code de la branche où la story sera développée, relu à chaque appel.
+        code: () => {
+          const c = readConfig(ctx.repoUri);
+          return codeCheckout(git, {
+            repoRoot,
+            worktreeRoot: worktreeRoot(repoRoot, c.worktreeRoot),
+            storyId,
+            purpose: 'plan',
+            baseSetting: c.gitBaseBranch,
+            feature: feature ? { id: feature.frontmatter.source_id, title: feature.title } : undefined
+          });
         }
       },
       story.filePath,
@@ -216,6 +251,7 @@ export class PlanningPanel {
     try {
       const target = await this.session.validate(this.workRoot, template);
       this.error = undefined;
+      await this.removeCheckout();
       this.ctx.onChanged();
       await this.post();
       const chosen = await vscode.window.showInformationMessage(

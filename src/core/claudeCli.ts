@@ -95,6 +95,8 @@ export interface ClaudeRequest {
   resume?: string;
   /** Outils disponibles. Une liste vide n'en laisse aucun. */
   tools: readonly string[];
+  /** Dossiers lisibles en plus de `cwd` (`--add-dir`) : le `.work` quand `cwd` est un worktree. */
+  addDirs?: readonly string[];
   /**
    * Règles de permission (`Bash(npm test:*)`…). Absentes : les outils de
    * `tools`, tous autorisés. Ce qui n'est pas autorisé est refusé : `-p` ne
@@ -176,6 +178,9 @@ export function buildClaudeArgs(request: ClaudeRequest, stream = false): string[
     args.push('--max-turns', String(request.maxTurns));
   }
   args.push('--tools', request.tools.join(','));
+  for (const dir of request.addDirs ?? []) {
+    args.push('--add-dir', dir);
+  }
   // Une règle par argument : une règle peut contenir des espaces.
   if (request.allowedTools) {
     if (request.allowedTools.length > 0) {

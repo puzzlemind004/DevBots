@@ -14,6 +14,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { ClaudeRunner } from './claudeCli.js';
+import { samePath } from './codeCheckout.js';
 import type { Answer, FormCheck, PlanContext, PlanSection, StoryPlan } from './plan.js';
 import {
   applySectionRevision,
@@ -58,11 +59,23 @@ export interface PlanningSettings {
   maxResumes: number;
 }
 
+/** Le code que lit la planification. */
+export interface PlanningCode {
+  dir: string;
+  /** La branche ou le commit extrait dans `dir`. */
+  ref: string;
+}
+
 export interface PlanningDeps {
   store: PlanStore;
   runner: ClaudeRunner;
   repoRoot: string;
   settings: PlanningSettings;
+  /**
+   * Le code à lire, mis à jour avant chaque appel : celui de la branche où la
+   * story sera développée (`codeCheckout`). Absent : `repoRoot`, tel quel.
+   */
+  code?: () => Promise<PlanningCode>;
 }
 
 export class PlanningError extends Error {
@@ -74,6 +87,8 @@ export class PlanningError extends Error {
 
 export class PlanningSession {
   private plan: StoryPlan | undefined;
+  /** Le dossier de l'appel en cours. */
+  private cwd: string;
 
   private constructor(
     private readonly deps: PlanningDeps,
@@ -84,7 +99,9 @@ export class PlanningSession {
     readonly state: PlanningState,
     /** Chemin absolu de la fiche de la feature parente, quand elle existe. */
     readonly featureFile?: string
-  ) {}
+  ) {
+    this.cwd = deps.repoRoot;
+  }
 
   /** Ouvre la planification d'une fiche, en reprenant l'état enregistré s'il existe. */
   static async open(
@@ -168,7 +185,7 @@ export class PlanningSession {
   async understand(signal?: AbortSignal): Promise<void> {
     this.assertNotValidated();
     const first = !this.state.sessionId;
-    const prompt = first ? this.firstPrompt() : this.reunderstandPrompt();
+    const prompt = first ? (code: PlanningCode | undefined) => this.firstPrompt(code) : () => this.reunderstandPrompt();
     if (!first && this.state.understanding) {
       await this.deps.store.appendHistory(this.state.storyId, {
         who: 'toi',
@@ -218,7 +235,7 @@ export class PlanningSession {
     if (!this.canDraft) {
       throw new PlanningError('Réponds aux questions bloquantes avant de demander le plan.');
     }
-    const output = await this.call(this.draftPrompt(), PLAN_SCHEMA, signal);
+    const output = await this.call(() => this.draftPrompt(), PLAN_SCHEMA, signal);
     const plan = parsePlan(output);
     const reason = this.plan ? 'plan réécrit' : 'premier jet';
     await this.commitPlan(plan, reason, PLAN_SECTIONS.map((s) => s.id));
@@ -244,7 +261,7 @@ export class PlanningSession {
       kind: `commentaire · ${sectionLabel(section)}`,
       text: comment.trim()
     });
-    const output = await this.call(this.revisePrompt(section, comment.trim()), PLAN_SCHEMA, signal);
+    const output = await this.call(() => this.revisePrompt(section, comment.trim()), PLAN_SCHEMA, signal);
     const revised = applySectionRevision(this.plan, parsePlan(output), section);
     await this.commitPlan(revised, `${sectionLabel(section)} reprise`, touchedSections(section));
   }
@@ -314,6 +331,7 @@ export class PlanningSession {
   async restart(): Promise<void> {
     this.assertNotValidated();
     delete this.state.sessionId;
+    delete this.state.cwd;
     delete this.state.understanding;
     this.state.answers = {};
     delete this.state.answersUnsent;
@@ -348,16 +366,36 @@ export class PlanningSession {
     await this.deps.store.save(this.state);
   }
 
-  private async call(prompt: string, schema: object, signal?: AbortSignal): Promise<unknown> {
+  /**
+   * Un appel à Claude, dans le dossier du code à lire. Le prompt est écrit une
+   * fois ce dossier connu : les chemins qu'il cite en dépendent.
+   */
+  private async call(
+    prompt: (code: PlanningCode | undefined) => string,
+    schema: object,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     const resume = this.state.sessionId;
     if (resume && this.state.resumes >= this.deps.settings.maxResumes) {
       throw new PlanningError(
         `Plafond de ${this.deps.settings.maxResumes} reprises atteint pour cette session. Recommence la planification, ou termine-la à la main.`
       );
     }
+    const code = await this.deps.code?.();
+    const cwd = code?.dir ?? this.deps.repoRoot;
+    // Claude range ses sessions par dossier : `--resume` ne les retrouve pas ailleurs.
+    const sessionCwd = this.state.cwd ?? this.deps.repoRoot;
+    if (resume && !samePath(sessionCwd, cwd)) {
+      throw new PlanningError(
+        `Cette session a commencé dans ${sessionCwd}, mais le code de la story se lit maintenant dans ${cwd} : la session ne peut pas y être reprise. Recommence la planification.`
+      );
+    }
+    this.cwd = cwd;
     const response = await this.deps.runner({
-      prompt,
-      cwd: this.deps.repoRoot,
+      prompt: prompt(code),
+      cwd,
+      // Les fiches restent dans le `.work` du dépôt, hors de git et donc absentes d'un worktree.
+      addDirs: samePath(cwd, this.deps.repoRoot) ? undefined : [this.workRoot()],
       schema,
       model: this.deps.settings.model || undefined,
       resume,
@@ -369,15 +407,22 @@ export class PlanningSession {
       this.state.resumes += 1;
     }
     this.state.sessionId = response.sessionId;
+    this.state.cwd = cwd;
     return response.output;
   }
 
-  private storyPath(): string {
-    return this.repoPath(this.storyFile);
+  /** Le dossier du flux : la fiche ouverte est dans son `new/`. */
+  private workRoot(): string {
+    return path.dirname(path.dirname(this.storyFile));
   }
 
-  private repoPath(filePath: string): string {
-    return path.relative(this.deps.repoRoot, filePath).split(path.sep).join('/');
+  /** Un chemin relatif au dossier de l'appel quand il y est, absolu sinon. */
+  private promptPath(filePath: string): string {
+    const relative = path.relative(this.cwd, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      return filePath;
+    }
+    return relative.split(path.sep).join('/');
   }
 
   private criteriaBlock(): string {
@@ -401,7 +446,7 @@ export class PlanningSession {
     ].join('\n');
   }
 
-  private firstPrompt(): string {
+  private firstPrompt(code: PlanningCode | undefined): string {
     const lines: string[] = [];
     if (this.deps.settings.skill) {
       lines.push(`/${this.deps.settings.skill.replace(/^\//, '')}`, '');
@@ -409,9 +454,14 @@ export class PlanningSession {
     lines.push(
       `Planification de la story ${this.state.storyId} — phase 1 : compréhension.`,
       '',
-      `Fiche de la story : ${this.storyPath()}`,
+      `Fiche de la story : ${this.promptPath(this.storyFile)}`,
       ...(this.featureFile
-        ? [`Fiche de sa feature, à lire pour le contexte commun : ${this.repoPath(this.featureFile)}`]
+        ? [`Fiche de sa feature, à lire pour le contexte commun : ${this.promptPath(this.featureFile)}`]
+        : []),
+      ...(code
+        ? [
+            `Le dossier courant contient le code de ${code.ref}, la branche sur laquelle la story sera développée : c'est ce code-là qu'il faut lire.`
+          ]
         : []),
       '',
       this.criteriaBlock(),

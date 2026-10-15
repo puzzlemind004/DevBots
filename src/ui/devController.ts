@@ -11,6 +11,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { verdictLabel, verifyAlreadyDone } from '../core/alreadyDone.js';
 import { ClaudeError, createClaudeStreamRunner, type ClaudeStreamRunner } from '../core/claudeCli.js';
+import { codeCheckout, removeReadCheckout } from '../core/codeCheckout.js';
+import { Git, worktreeRoot } from '../core/git.js';
 import { FlowStateStore, RUNNING_STATUSES, statusLabel, type StoryRun } from '../core/flowState.js';
 import { Orchestrator, type DevSettings, type OrchestratorEvent } from '../core/orchestrator.js';
 import { safeId } from '../core/planStore.js';
@@ -425,7 +427,7 @@ export class DevController implements vscode.Disposable {
         },
         {
           label: '$(search) Faire vérifier par un agent avant',
-          detail: `Un agent en lecture seule cherche dans le dépôt (branche extraite, historique git) le code de chaque critère. Done s'il le confirme ; sinon la story reste ${where}, avec son rapport.`,
+          detail: `Un agent en lecture seule cherche le code de chaque critère sur la branche de la story (celle de sa feature s'il y en a une) et dans l'historique git. Done s'il le confirme ; sinon la story reste ${where}, avec son rapport.`,
           value: 'verify' as const
         },
         ...(story.folder === 'ready'
@@ -487,24 +489,44 @@ export class DevController implements vscode.Disposable {
     this.ctx.refresh();
     (await this.journal(id, true)).show(true);
     const config = readConfig(this.ctx.repoUri);
+    const repoRoot = this.ctx.repoUri.fsPath;
+    const git = new Git(repoRoot);
+    const root = worktreeRoot(repoRoot, config.worktreeRoot);
     try {
+      const feature = await this.workDir.findFeature(story.frontmatter.parent);
       const verification = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `${id} : un agent vérifie le travail déjà fait…`, cancellable: true },
-        (_progress, token) => {
+        async (_progress, token) => {
           const controller = new AbortController();
           token.onCancellationRequested(() => controller.abort());
-          return verifyAlreadyDone(
-            {
-              repoRoot: this.ctx.repoUri.fsPath,
-              workDir: this.workDir,
-              stream: this.streamRunner(),
-              model: config.supervisionModel,
-              onJournal: (storyId, line) => this.journals.get(storyId)?.appendLine(line)
-            },
-            story,
-            hint,
-            controller.signal
-          );
+          try {
+            return await verifyAlreadyDone(
+              {
+                repoRoot,
+                workDir: this.workDir,
+                stream: this.streamRunner(),
+                model: config.supervisionModel,
+                // Le code de la branche de la story : celui de sa feature, stories déjà mergées comprises.
+                code: () =>
+                  codeCheckout(git, {
+                    repoRoot,
+                    worktreeRoot: root,
+                    storyId: id,
+                    purpose: 'verify',
+                    baseSetting: config.gitBaseBranch,
+                    feature: feature ? { id: feature.frontmatter.source_id, title: feature.title } : undefined
+                  }),
+                onJournal: (storyId, line) => this.journals.get(storyId)?.appendLine(line)
+              },
+              story,
+              hint,
+              controller.signal
+            );
+          } finally {
+            await removeReadCheckout(git, root, id, 'verify').catch((err: unknown) =>
+              this.ctx.log.warn(`${id} : worktree de vérification non supprimé : ${err instanceof Error ? err.message : String(err)}`)
+            );
+          }
         }
       );
       // La fiche a pu bouger pendant la vérification : on repart de ce qui est sur disque.

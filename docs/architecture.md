@@ -24,6 +24,7 @@ src/
 │   ├── templates.ts    Gabarits du plan et du CR : ceux du dépôt, sinon par défaut
 │   ├── initSkill.ts    Le skill devbots-init : assemblage et dépôt dans .claude/skills/
 │   ├── planning.ts     L'atelier de planification, sans interface
+│   ├── codeCheckout.ts Le code lu avant le dev : branche de la story, worktree détaché
 │   ├── flowState.ts    state.json : le parcours des stories après Ready
 │   ├── schedule.ts     Ordonnancement : dépendances retenues, fichiers occupés, étapes de Ready
 │   ├── git.ts          Branches, worktrees, commits, diff, intégration, fast-forward
