@@ -3,9 +3,11 @@ import matter from 'gray-matter';
 import {
   fillTemplate,
   parseCriteria,
+  prose,
   readPlanContext,
   renderPlanMarkdown,
-  renderReadyCard
+  renderReadyCard,
+  renderSection
 } from '../../src/core/planRender.js';
 import { SAMPLE_CARD, samplePlan } from './fixtures.js';
 
@@ -54,6 +56,54 @@ describe('renderPlanMarkdown', () => {
     expect(md).toContain('**C1** Un email invalide est refusé → étape 1');
     expect(md).toContain('`src/app/email.validator.ts`');
     expect(md).toContain('40 : confirmée');
+  });
+});
+
+describe('renderSection — étapes', () => {
+  const steps = [1, 2, 10].map((id) => ({
+    id,
+    title: `Titre ${id}`,
+    approach: "Exposer le service.\n- Créer `Foo`\n- Brancher l'injection",
+    files: ['src/a.ts', 'src/b.ts']
+  }));
+  const md = renderSection(samplePlan({ steps }), 'steps');
+
+  it('donne un sous-titre à chaque étape, y compris au-delà de 9', () => {
+    expect(md.match(/^### Étape \d+ — Titre \d+$/gm)).toEqual([
+      '### Étape 1 — Titre 1',
+      '### Étape 2 — Titre 2',
+      '### Étape 10 — Titre 10'
+    ]);
+  });
+
+  it('sépare le but, les actions et les fichiers par une ligne vide', () => {
+    expect(md).toContain(
+      "### Étape 10 — Titre 10\n\nExposer le service.\n\n- Créer `Foo`\n- Brancher l'injection\n\nFichiers : `src/a.ts`, `src/b.ts`"
+    );
+  });
+
+  it("n'indente rien", () => {
+    expect(md).not.toMatch(/^ +\S/m);
+  });
+});
+
+describe('prose', () => {
+  it('ajoute une ligne vide avant et après une liste', () => {
+    expect(prose('But.\n- a\n- b\nSuite.')).toBe('But.\n\n- a\n- b\n\nSuite.');
+  });
+
+  it("garde la suite indentée d'une puce dans la puce", () => {
+    expect(prose('- a\n  suite de a\n- b')).toBe('- a\n  suite de a\n- b');
+  });
+
+  it('réduit les lignes vides en trop', () => {
+    expect(prose('\r\nUn.\r\n\r\n\r\nDeux.\n\n')).toBe('Un.\n\nDeux.');
+  });
+
+  it('ne touche pas aux blocs de code', () => {
+    expect(prose('Voir :\n```ts\n- pas une liste\n\n\nx\n```')).toBe(
+      'Voir :\n\n```ts\n- pas une liste\n\n\nx\n```'
+    );
   });
 });
 

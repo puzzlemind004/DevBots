@@ -140,7 +140,7 @@ dossier du flux, sinon le gabarit par défaut. Marqueurs reconnus :
 | `{{story}}` | Le corps de la fiche d'origine, sans son titre |
 | `{{comprehension}}` | Reformulation, hypothèses, décisions |
 | `{{couverture}}` | Critères et étapes qui les couvrent |
-| `{{etapes}}` | Étapes numérotées, approche, fichiers |
+| `{{etapes}}` | Un sous-titre `###` par étape, puis son approche et ses fichiers |
 | `{{tests}}` | Tests unitaires et e2e |
 | `{{dependances}}` | Verdicts sur les dépendances, risques |
 | `{{execution}}` | Modèle recommandé, complexité, justification |

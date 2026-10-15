@@ -64,7 +64,7 @@ export function renderSection(plan: StoryPlan, section: PlanSection): string {
     case 'understanding': {
       const u = plan.understanding;
       return [
-        u.restatement.trim(),
+        prose(u.restatement),
         list('Hypothèses', u.assumptions),
         list('Décisions', u.decisions)
       ]
@@ -82,15 +82,21 @@ export function renderSection(plan: StoryPlan, section: PlanSection): string {
                 }`
             )
             .join('\n');
+    // Un sous-titre par étape plutôt qu'une liste numérotée : l'approche contient
+    // sa propre liste, et une liste imbriquée dépend d'une indentation que
+    // « 10. » ne tient plus, où la ligne des fichiers se colle à la dernière puce.
     case 'steps':
       return plan.steps
-        .map((s) => {
-          const files = s.files.length
-            ? `\n   Fichiers : ${s.files.map((f) => `\`${f}\``).join(', ')}`
-            : '';
-          return `${s.id}. **${s.title}**\n   ${s.approach.trim().replace(/\n/g, '\n   ')}${files}`;
-        })
-        .join('\n');
+        .map((s) =>
+          [
+            `### Étape ${s.id} — ${s.title.trim()}`,
+            prose(s.approach),
+            s.files.length ? `Fichiers : ${s.files.map((f) => `\`${f}\``).join(', ')}` : ''
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+        )
+        .join('\n\n');
     case 'tests':
       return [list('Unitaires', plan.tests.unit), list('E2E', plan.tests.e2e)]
         .filter(Boolean)
@@ -110,7 +116,7 @@ export function renderSection(plan: StoryPlan, section: PlanSection): string {
       return [
         `- Modèle recommandé : ${MODEL_LABELS[plan.execution.model]}`,
         `- Complexité : ${COMPLEXITY_LABELS[plan.execution.complexity]}`,
-        plan.execution.rationale.trim() ? `\n${plan.execution.rationale.trim()}` : ''
+        plan.execution.rationale.trim() ? `\n${prose(plan.execution.rationale)}` : ''
       ]
         .filter(Boolean)
         .join('\n');
@@ -137,7 +143,7 @@ export function renderPlanMarkdown(plan: StoryPlan, title: string, version: numb
 
 /** La compréhension et les réponses, pour l'historique. */
 export function renderUnderstanding(understanding: Understanding, answers: Answers): string {
-  const parts = [understanding.restatement.trim()];
+  const parts = [prose(understanding.restatement)];
   if (understanding.assumptions.length) {
     parts.push(list('Hypothèses', understanding.assumptions));
   }
@@ -147,6 +153,46 @@ export function renderUnderstanding(understanding: Understanding, answers: Answe
     parts.push(`**${q.id}${q.blocking ? ' (bloquante)' : ''}** ${q.question}\n→ ${answer}`);
   }
   return parts.join('\n\n');
+}
+
+const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s+/;
+
+/**
+ * Le texte libre de Claude, aéré pour le markdown : une ligne vide autour de
+ * chaque liste, jamais plus d'une à la suite.
+ *
+ * Sans ligne vide, une ligne qui suit une liste s'y colle comme suite de la
+ * dernière puce. Une ligne indentée sous une puce reste sa suite. Les blocs de
+ * code ne sont pas touchés.
+ */
+export function prose(text: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  type Kind = 'blank' | 'list' | 'text';
+  let prev: Kind = 'blank';
+  for (const line of text.replace(/\r\n/g, '\n').trim().split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      if (!inFence && prev !== 'blank') out.push('');
+      inFence = !inFence;
+      out.push(line);
+      prev = 'text';
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    if (!line.trim()) {
+      if (prev !== 'blank') out.push('');
+      prev = 'blank';
+      continue;
+    }
+    const kind: Kind = LIST_ITEM.test(line) ? 'list' : prev === 'list' && /^\s/.test(line) ? 'list' : 'text';
+    if (prev !== 'blank' && kind !== prev) out.push('');
+    out.push(line.trimEnd());
+    prev = kind;
+  }
+  return out.join('\n');
 }
 
 function list(label: string, items: string[]): string {
